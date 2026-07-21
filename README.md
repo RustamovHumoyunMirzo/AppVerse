@@ -1,50 +1,18 @@
-<img src="images/PyVerseIcon.png" alt="PyVerse icon" width="200" height="200">
-
 # PyVerse
-
-[![GitHub Actions Build Status](https://github.com/RustamovHumoyunMirzo/PyVerse/actions/workflows/build-wheels.yaml/badge.svg)](https://github.com/RustamovHumoyunMirzo/PyVerse/actions/workflows/build-wheels.yaml)
 
 A powerful Python framework for building modern desktop and mobile applications using web technologies. It allows developers to create rich user interfaces with HTML, CSS, and JavaScript while keeping the core logic in Python.
 
-## Requirements
+AppVerse can be called "PyVerse" as well, which is a more concise name that emphasizes the Python aspect of the framework. Both names are used interchangeably in the documentation and codebase.
 
-- Python 3.8 or higher
-- [CMake](https://cmake.org/) (for building C++ extensions)
-- [pip](https://pip.pypa.io/) and [virtualenv](https://virtualenv.pypa.io/)
+## Key Features
 
-## Setup
+- **Web Technologies**: Leverage the power of web development to create stunning UIs with HTML, CSS, and JavaScript.
+- **Python Integration**: Seamlessly integrate Python code with the frontend, enabling complex logic and data processing.
+- **Performance**: Built on top of a high-performance C/C++ core, PyVerse delivers fast and responsive applications.
+- **Easy to Use**: Designed with a simple and intuitive API, making it easy for developers to get started.
 
-1. **Clone the repository:**
-
-    ```bash
-    git clone https://github.com/RustamovHumoyunMirzo/PyVerse.git
-    cd PyVerse
-    ```
-
-2. **Create a virtual environment (recommended):**
-
-    ```bash
-    python -m venv venv
-    source venv/bin/activate   # Linux/macOS
-    venv\Scripts\activate      # Windows
-    ```
-
-3. **Install dependencies:**
-
-    ```bash
-    pip install --upgrade pip setuptools wheel
-    pip install -e .
-    ```
-    The `-e .` option installs the package in editable mode for development.
-
-## Build Wheels
-
-You can build cross-platform wheels using [cibuildwheel](https://cibuildwheel.readthedocs.io/):
+## Installation
 
 ```bash
-cibuildwheel --output-dir wheelhouse
+pip install appverse
 ```
-
-## Documentation
-
-Full documentation is available in the [docs](docs) folder.

@@ -41,6 +41,5 @@ the matching package for your OS.
 
 ## Wheel Strategy
 
-The Python extension targets the CPython stable ABI for Python 3.9+, so each
-platform and architecture can ship one wheel for all supported CPython minors.
-Native wheels are still platform-specific because they contain compiled code.
+AppVerse publishes native CPython wheels for Python 3.9 and newer. Wheels are
+platform- and architecture-specific because they contain compiled code.

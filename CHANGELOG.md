@@ -11,7 +11,7 @@ The project follows semantic versioning while the public API matures.
 - Initial `appverse` Python package scaffold.
 - Native WebView-backed `Window` API for title, size, HTML, navigation,
   JavaScript initialization, JavaScript evaluation, event loop, and destroy.
-- CPython stable ABI build configuration for Python 3.9+ wheels.
+- Native CPython wheel build configuration for Python 3.9+.
 - PowerShell scripts to pull `webview/webview`, build locally, and run the
   starter app.
 - GitHub Actions workflows for CI, wheel builds, and PyPI publishing.

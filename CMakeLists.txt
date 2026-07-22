@@ -6,26 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Python3 COMPONENTS Interpreter Development.SABIModule QUIET)
-if(TARGET Python3::SABIModule)
-  set(APPVERSE_PYTHON_TARGET Python3::SABIModule)
-else()
-  find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
-  set(APPVERSE_PYTHON_TARGET Python3::Module)
-
-  if(WIN32)
-    get_filename_component(APPVERSE_PYTHON_DIR "${Python3_EXECUTABLE}" DIRECTORY)
-    set(APPVERSE_PYTHON_ABI3_LIB "${APPVERSE_PYTHON_DIR}/libs/python3.lib")
-    if(EXISTS "${APPVERSE_PYTHON_ABI3_LIB}")
-      add_library(appverse_python_abi3 UNKNOWN IMPORTED)
-      set_target_properties(appverse_python_abi3 PROPERTIES
-        IMPORTED_LOCATION "${APPVERSE_PYTHON_ABI3_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${Python3_INCLUDE_DIRS}"
-      )
-      set(APPVERSE_PYTHON_TARGET appverse_python_abi3)
-    endif()
-  endif()
-endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
 
 set(PYVERSE_WEBVIEW_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/webview")
 if(EXISTS "${PYVERSE_WEBVIEW_DIR}/CMakeLists.txt")
@@ -44,7 +25,7 @@ add_library(pyverse_native MODULE
 )
 
 target_link_libraries(pyverse_native PRIVATE
-  ${APPVERSE_PYTHON_TARGET}
+  Python3::Module
   webview::core_static
 )
 
@@ -58,12 +39,6 @@ set_target_properties(pyverse_native PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/appverse"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/appverse"
 )
-
-if(Python3_SOSABI)
-  set_target_properties(pyverse_native PROPERTIES SUFFIX "${Python3_SOSABI}")
-elseif(NOT WIN32)
-  set_target_properties(pyverse_native PROPERTIES SUFFIX ".abi3${CMAKE_SHARED_LIBRARY_SUFFIX}")
-endif()
 
 set(PYVERSE_RUNTIME_FILES)
 

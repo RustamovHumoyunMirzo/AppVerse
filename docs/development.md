@@ -30,10 +30,10 @@ is unavailable, it downloads the tagged source archive.
 The build writes a development copy of `_native.pyd` into `src/appverse` and
 installs runtime DLLs needed on Windows.
 
-## Native ABI
+## Native Extension
 
-The C++ extension uses CPython's stable ABI beginning at Python 3.9. Native state
-is stored in a capsule and wrapped by the pure Python `appverse.Window` class.
+The C++ extension is built for each supported CPython version. Native state is
+stored in a capsule and wrapped by the pure Python `appverse.Window` class.
 
 ## Roadmap
 

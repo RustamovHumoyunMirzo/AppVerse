@@ -41,7 +41,6 @@ Changelog = "https://github.com/RustamovHumoyunMirzo/PyVerse/blob/main/CHANGELOG
 [tool.scikit-build]
 cmake.version = ">=3.26"
 wheel.packages = ["src/appverse", "src/pyverse"]
-wheel.py-api = "cp39"
 sdist.include = [
   "CMakeLists.txt",
   "src/native/**",
@@ -53,7 +52,7 @@ sdist.include = [
 ]
 
 [tool.cibuildwheel]
-build = "cp39-*"
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
 skip = "pp* *-musllinux_*"
 test-command = "python -c \"import appverse; print(appverse.HINT_NONE)\""
 

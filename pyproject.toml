@@ -1,0 +1,67 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "wheel"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "appverse"
+version = "1.0.0-alpha"
+description = "Build native webview applications for Python."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "RustamovHumoyunMirzo" }]
+keywords = ["desktop", "webview", "gui", "electron", "native", "html"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: MacOS X",
+  "Environment :: Win32 (MS Windows)",
+  "Environment :: X11 Applications",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: User Interfaces",
+]
+
+[project.urls]
+Homepage = "https://github.com/RustamovHumoyunMirzo/PyVerse"
+Documentation = "https://github.com/RustamovHumoyunMirzo/PyVerse/tree/main/docs"
+Issues = "https://github.com/RustamovHumoyunMirzo/PyVerse/issues"
+Changelog = "https://github.com/RustamovHumoyunMirzo/PyVerse/blob/main/CHANGELOG.md"
+
+[tool.scikit-build]
+cmake.minimum-version = "3.26"
+wheel.packages = ["src/appverse", "src/pyverse"]
+wheel.py-api = "cp39"
+sdist.include = [
+  "CMakeLists.txt",
+  "src/native/**",
+  "src/appverse/**",
+  "src/pyverse/**",
+  "scripts/**",
+  "examples/**",
+  "docs/**",
+]
+
+[tool.cibuildwheel]
+build = "cp39-*"
+skip = "pp* *-musllinux_*"
+test-command = "python -c \"import appverse; print(appverse.HINT_NONE)\""
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64", "x86", "ARM64"]
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64", "aarch64"]

@@ -1,64 +1,54 @@
 # Contributing
 
-Thank you for your interest in contributing to this project!
-
-We welcome contributions from everyone. Please read this guide before submitting changes.
-
-## Ways to Contribute
-
-You can contribute by:
-
-- Reporting bugs
-- Suggesting new features
-- Improving documentation
-- Submitting code changes
-- Reviewing pull requests
-
-## Reporting Issues
-
-If you find a bug, please open an issue and include:
-
-- A clear description of the problem
-- Steps to reproduce the issue
-- Expected behavior
-- Screenshots (if applicable)
-- Environment details
-
-## Feature Requests
-
-Before requesting a new feature:
-
-1. Check if the feature already exists.
-2. Search existing issues.
-3. Describe the use case clearly.
+Thanks for helping build AppVerse.
 
 ## Development Setup
 
-1. Fork the repository
-2. Clone your fork
-```bash
-git clone https://github.com/your-username/project-name.git
+Install Python 3.9+, CMake 3.26+, Ninja, Git, and a platform C++ toolchain.
+
+Windows:
+
+```powershell
+.\scripts\build.ps1
+.\scripts\run-starter.ps1 -SkipBuild
 ```
-3. Create a new branch
+
+Linux:
+
 ```bash
-git checkout -b feature/my-feature
+sudo apt-get install -y cmake ninja-build libgtk-3-dev libwebkit2gtk-4.1-dev
+python -m pip install --upgrade pip build
+python -m build
 ```
 
-4. Make your changes.
+macOS:
 
-## Coding Standards
+```bash
+python -m pip install --upgrade pip build
+python -m build
+```
 
-- Write clear and readable code
-- Follow existing project structure
-- Use meaningful variable names
-- Add comments when necessary
+## Pull Requests
 
-## Pull Request Process
+Before opening a PR:
 
-1. Ensure your code compiles and passes tests
-2. Update documentation if needed
-3. Submit a pull request with a clear description
+- Keep changes focused and documented.
+- Update `docs/` and `CHANGELOG.md` for user-visible behavior.
+- Run a local package build where your platform allows it.
+- Include screenshots or a short screen recording for UI-facing changes.
 
-## Code of Conduct
+## Native Code Guidelines
 
-Please be respectful and constructive when interacting with others.
+- Keep the Python ABI stable unless there is a clear release reason not to.
+- Prefer `webview/webview` APIs over platform-specific branches.
+- Keep the Python wrapper small and predictable.
+- Do not add new native dependencies without documenting wheel impact.
+
+## Release Process
+
+Releases are published under the `appverse` PyPI project. GitHub Actions builds
+wheels with cibuildwheel and publishes through PyPI trusted publishing.
+
+1. Update the version in `pyproject.toml` and `CMakeLists.txt`.
+2. Update `CHANGELOG.md`.
+3. Create a GitHub release or run the publish workflow manually.

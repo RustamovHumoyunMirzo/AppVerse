@@ -1,0 +1,15 @@
+build/
+external/webview/
+src/pyverse/_native.*
+src/pyverse/*.dll
+src/appverse/_native.*
+src/appverse/*.dll
+__pycache__/
+*.py[cod]
+.venv/
+.idea/
+.vscode/
+.agents/
+build-temp/
+.tmp/
+external/

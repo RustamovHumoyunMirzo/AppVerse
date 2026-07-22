@@ -1,4 +1,9 @@
 build/
+build-temp/
+stage/
+dist/
+wheelhouse/
+.tmp/
 external/webview/
 src/pyverse/_native.*
 src/pyverse/*.dll

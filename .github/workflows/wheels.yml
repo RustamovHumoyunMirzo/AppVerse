@@ -14,7 +14,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-13, macos-14, ubuntu-latest]
+        include:
+          - os: windows-latest
+            archs: "AMD64 x86 ARM64"
+            label: windows
+          - os: macos-13
+            archs: "x86_64"
+            label: macos-x86_64
+          - os: macos-14
+            archs: "arm64"
+            label: macos-arm64
+          - os: ubuntu-latest
+            archs: "x86_64 aarch64"
+            label: linux
 
     steps:
       - uses: actions/checkout@v4
@@ -32,18 +44,16 @@ jobs:
         env:
           CIBW_BUILD: cp39-*
           CIBW_SKIP: "pp* *-musllinux_*"
-          CIBW_ARCHS_WINDOWS: "AMD64 x86 ARM64"
-          CIBW_ARCHS_MACOS: "x86_64 arm64"
-          CIBW_ARCHS_LINUX: "x86_64 aarch64"
+          CIBW_ARCHS: ${{ matrix.archs }}
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: "dnf install -y gtk3-devel webkit2gtk4.1-devel || dnf install -y gtk3-devel webkit2gtk3-devel"
-          CIBW_REPAIR_WHEEL_COMMAND_LINUX: "auditwheel repair -w {dest_dir} {wheel} --exclude libgtk-3.so.0 --exclude libgdk-3.so.0 --exclude libwebkit2gtk-4.1.so.0 --exclude libwebkit2gtk-4.0.so.37 --exclude libjavascriptcoregtk-4.1.so.0 --exclude libjavascriptcoregtk-4.0.so.18"
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: "auditwheel repair --exclude libgtk-3.so.0 --exclude libgdk-3.so.0 --exclude libwebkit2gtk-4.1.so.0 --exclude libwebkit2gtk-4.0.so.37 --exclude libjavascriptcoregtk-4.1.so.0 --exclude libjavascriptcoregtk-4.0.so.18 -w {dest_dir} {wheel}"
           CIBW_TEST_COMMAND: "python -c \"import appverse; print(appverse.HINT_NONE)\""
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.label }}
           path: wheelhouse/*.whl
 
   sdist:

@@ -4,7 +4,7 @@ All notable changes to AppVerse will be documented in this file.
 
 The project follows semantic versioning while the public API matures.
 
-## [1.0.0] - 2026-07-22
+## [1.0.0a0] - 2026-07-22
 
 ### Added
 

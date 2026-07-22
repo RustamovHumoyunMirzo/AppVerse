@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "appverse"
-version = "1.0.0-alpha"
+version = "1.0.0a0"
 description = "Build native webview applications for Python."
 readme = "README.md"
 requires-python = ">=3.9"

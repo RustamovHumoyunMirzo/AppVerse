@@ -7,14 +7,40 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+  windows:
+    name: Windows package checks
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-        python-version: ["3.9", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip build
+
+      - name: Build wheel and sdist
+        run: python -m build --wheel
+
+      - name: Smoke test wheel
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl
+          python -c "import appverse; print(appverse.HINT_NONE)"
+
+  linux:
+    name: Linux package checks
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +50,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install Linux webview build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libgtk-3-dev libwebkit2gtk-4.1-dev || \
@@ -33,11 +58,36 @@ jobs:
       - name: Install build tools
         run: python -m pip install --upgrade pip build
 
-      - name: Build wheel and sdist
-        run: python -m build
+      - name: Build wheel
+        run: python -m build --wheel
 
       - name: Smoke test wheel
-        shell: bash
+        run: |
+          python -m pip install dist/*.whl
+          python -c "import appverse; print(appverse.HINT_NONE)"
+
+  macos:
+    name: macOS package checks
+    runs-on: macos-13
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip build
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Smoke test wheel
         run: |
           python -m pip install dist/*.whl
           python -c "import appverse; print(appverse.HINT_NONE)"

@@ -7,66 +7,83 @@ on:
     tags:
       - "v*"
 
-jobs:
-  build:
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            archs: "AMD64 x86 ARM64"
-            label: windows
-          - os: macos-13
-            archs: "x86_64"
-            label: macos-x86_64
-          - os: macos-14
-            archs: "arm64"
-            label: macos-arm64
-          - os: ubuntu-latest
-            archs: "x86_64 aarch64"
-            label: linux
+env:
+  CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
+  CIBW_SKIP: "pp* *-musllinux_*"
+  CIBW_TEST_COMMAND: "python -c \"import appverse; print(appverse.HINT_NONE)\""
 
+jobs:
+  windows:
+    name: Windows wheels
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build Windows wheels
+        uses: pypa/cibuildwheel@v2.21
+        env:
+          CIBW_ARCHS_WINDOWS: "AMD64 x86 ARM64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows
+          path: wheelhouse/*.whl
+
+  linux:
+    name: Linux wheels
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up QEMU
-        if: runner.os == 'Linux'
         uses: docker/setup-qemu-action@v3
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - name: Build wheels
+      - name: Build Linux wheels
         uses: pypa/cibuildwheel@v2.21
         env:
-          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
-          CIBW_SKIP: "pp* *-musllinux_*"
-          CIBW_ARCHS: ${{ matrix.archs }}
+          CIBW_ARCHS_LINUX: "x86_64 aarch64"
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: "dnf install -y gtk3-devel webkit2gtk4.1-devel || dnf install -y gtk3-devel webkit2gtk3-devel"
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: "auditwheel repair --exclude libgtk-3.so.0 --exclude libgdk-3.so.0 --exclude libwebkit2gtk-4.1.so.0 --exclude libwebkit2gtk-4.0.so.37 --exclude libjavascriptcoregtk-4.1.so.0 --exclude libjavascriptcoregtk-4.0.so.18 -w {dest_dir} {wheel}"
-          CIBW_TEST_COMMAND: "python -c \"import appverse; print(appverse.HINT_NONE)\""
+
+      - name: Build source distribution
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.label }}
-          path: wheelhouse/*.whl
+          name: wheels-linux
+          path: |
+            wheelhouse/*.whl
+            dist/*.tar.gz
 
-  sdist:
-    name: Build sdist
-    runs-on: ubuntu-latest
+  macos:
+    name: macOS wheels
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install --upgrade pip build
-      - run: python -m build --sdist
+
+      - name: Build macOS wheels
+        uses: pypa/cibuildwheel@v2.21
+        env:
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_TEST_SKIP: "*-macosx_arm64"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: sdist
-          path: dist/*.tar.gz
+          name: wheels-macos
+          path: wheelhouse/*.whl

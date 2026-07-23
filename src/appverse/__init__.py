@@ -87,7 +87,7 @@ READY_REVEAL_JS = r"""
 """
 
 
-@dataclass(slots=True)
+@dataclass
 class WindowOptions:
     title: str = "AppVerse"
     width: int = 960

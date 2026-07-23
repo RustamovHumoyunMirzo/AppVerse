@@ -30,11 +30,40 @@ html = """
 </html>
 """
 
-window = appverse.create_window(debug=True)
-window.set_title("AppVerse Starter")
-window.set_size(960, 640)
-window.set_html(html)
+window = appverse.create_window(
+    title="AppVerse Starter",
+    width=960,
+    height=640,
+    debug=True,
+    show_when_ready=True,
+    html=html,
+)
 window.run()
+```
+
+## Load Local HTML
+
+```python
+window = appverse.create_window(title="Local UI", show_when_ready=True)
+window.load_html("ui/index.html")
+window.run()
+```
+
+## Events and Bridge
+
+```python
+@window.on(appverse.READY)
+def ready(_window):
+    window.send("python-ready", {"ok": True})
+
+@window.bind("ping")
+def ping(message):
+    return {"reply": message}
+```
+
+```javascript
+window.appverse.on("python-ready", (event) => console.log(event.detail));
+const result = await window.appverse.call("ping", "hello");
 ```
 
 ## Repository Example

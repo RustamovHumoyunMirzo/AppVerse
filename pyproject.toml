@@ -32,12 +32,6 @@ classifiers = [
   "Topic :: Software Development :: User Interfaces",
 ]
 
-[project.urls]
-Homepage = "https://github.com/RustamovHumoyunMirzo/PyVerse"
-Documentation = "https://github.com/RustamovHumoyunMirzo/PyVerse/tree/main/docs"
-Issues = "https://github.com/RustamovHumoyunMirzo/PyVerse/issues"
-Changelog = "https://github.com/RustamovHumoyunMirzo/PyVerse/blob/main/CHANGELOG.md"
-
 [tool.scikit-build]
 cmake.version = ">=3.26"
 wheel.packages = ["src/appverse", "src/pyverse"]

@@ -17,10 +17,19 @@ packaging foundation and a minimal native window:
 ```python
 import appverse
 
-window = appverse.create_window(debug=True)
-window.set_title("AppVerse")
-window.set_size(960, 640)
-window.set_html("<h1>Hello from Python</h1>")
+window = appverse.create_window(
+    title="AppVerse",
+    width=960,
+    height=640,
+    debug=True,
+    show_when_ready=True,
+    html="<h1>Hello from Python</h1>",
+)
+
+@window.bind("ping")
+def ping(message):
+    return {"reply": message}
+
 window.run()
 ```
 
@@ -32,6 +41,14 @@ pip install appverse
 
 Linux users also need WebKitGTK runtime libraries. See
 [Platform Support](docs/platform-support.md).
+
+Local HTML files can be loaded directly:
+
+```python
+window = appverse.create_window(show_when_ready=True)
+window.load_html("ui/index.html")
+window.run()
+```
 
 ## Local Development
 
@@ -49,6 +66,7 @@ CMake, and builds the native extension.
 
 - [Getting Started](docs/getting-started.md)
 - [API Reference](docs/api.md)
+- [JavaScript Bridge](docs/js-bridge.md)
 - [Platform Support](docs/platform-support.md)
 - [Packaging and Publishing](docs/packaging.md)
 - [Development](docs/development.md)

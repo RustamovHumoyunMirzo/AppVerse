@@ -73,12 +73,18 @@ HTML = """
       This window is Python driving native WebView2 through a tiny C++ bridge.
       Next up: Python-to-JavaScript bindings, packaging, and app lifecycle APIs.
     </p>
-    <button id="ping">Run JavaScript</button>
+    <button id="ping">Call Python</button>
     <span id="status">Ready</span>
   </main>
   <script>
-    document.querySelector("#ping").addEventListener("click", () => {
-      document.querySelector("#status").textContent = `Clicked at ${new Date().toLocaleTimeString()}`;
+    window.appverse.on("python:tick", (event) => {
+      document.querySelector("#status").textContent = event.detail.message;
+    });
+
+    document.querySelector("#ping").addEventListener("click", async () => {
+      const result = await window.appverse.call("ping", new Date().toLocaleTimeString());
+      document.querySelector("#status").textContent = result.message;
+      await window.appverse.send("button-clicked", result);
     });
   </script>
 </body>
@@ -87,10 +93,26 @@ HTML = """
 
 
 def main() -> None:
-    window = appverse.create_window(debug=True)
-    window.set_title("AppVerse Starter")
-    window.set_size(960, 640, appverse.HINT_NONE)
-    window.set_html(HTML)
+    window = appverse.create_window(
+        title="AppVerse Starter",
+        width=960,
+        height=640,
+        debug=True,
+        show_when_ready=True,
+        html=HTML,
+    )
+
+    @window.on(appverse.MESSAGE)
+    def _message(name: str, detail: object) -> None:
+        print(f"JS event: {name} {detail}")
+
+    @window.bind("ping")
+    def _ping(timestamp: str) -> dict[str, str]:
+        message = f"Python received a click at {timestamp}"
+        window.send("python:tick", {"message": message})
+        return {"message": message}
+
+    window.show()
     window.run()
 
 

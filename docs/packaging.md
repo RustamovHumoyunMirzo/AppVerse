@@ -36,3 +36,14 @@ repair so the OS package manager remains responsible for them.
 3. Publish a GitHub release or run the `Publish` workflow manually.
 
 No PyPI API token is required when trusted publishing is configured.
+
+## Privacy Notes
+
+The package metadata intentionally avoids personal names, email addresses, and
+personal repository URLs. If you want to keep your identity private, publish from
+a GitHub organization and PyPI account/organization name that you are comfortable
+showing publicly.
+
+The publish workflow disables PyPI attestations because attestations can expose
+the GitHub workflow identity used to publish the package. Trusted publishing
+still avoids long-lived PyPI API tokens.

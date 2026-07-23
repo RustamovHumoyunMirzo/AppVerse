@@ -39,7 +39,7 @@ stored in a capsule and wrapped by the pure Python `appverse.Window` class.
 
 Near-term work:
 
-- Python callable bindings from JavaScript.
 - App lifecycle helpers.
 - File and asset loading utilities.
+- macOS and Linux native icon and frameless support.
 - Packaging examples for distributable applications.

@@ -30,8 +30,16 @@ jobs:
       - name: Prepare distributions
         shell: bash
         run: |
+          rm -rf dist
           mkdir -p dist
-          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) -exec cp {} dist/ \;
+          while IFS= read -r file; do
+            cp "$file" dist/
+          done < <(find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \))
+          if find dist -mindepth 1 -type d | grep -q .; then
+            echo "Unexpected directory found in dist:"
+            find dist -mindepth 1 -type d -print
+            exit 1
+          fi
           find dist -maxdepth 1 -type f -print
           test "$(find dist -maxdepth 1 -type f \( -name "*.whl" -o -name "*.tar.gz" \) | wc -l)" -gt 0
 

@@ -8,6 +8,12 @@ AppVerse opens a native desktop webview from Python.
 pip install appverse
 ```
 
+For PNG/JPG icon conversion on Windows:
+
+```bash
+pip install "appverse[icons]"
+```
+
 For local development from this repository:
 
 ```powershell
@@ -49,6 +55,14 @@ window.load_html("ui/index.html")
 window.run()
 ```
 
+To keep a window hidden until you decide to show it:
+
+```python
+window = appverse.create_window(visible=False)
+window.load_html("ui/index.html")
+window.run()
+```
+
 ## Events and Bridge
 
 ```python
@@ -56,9 +70,16 @@ window.run()
 def ready(_window):
     window.send("python-ready", {"ok": True})
 
+@window.on(appverse.SHOW)
+def shown(_window, applied):
+    print("show requested", applied)
+
 @window.bind("ping")
 def ping(message):
     return {"reply": message}
+
+window.set_html(html)
+window.run()
 ```
 
 ```javascript

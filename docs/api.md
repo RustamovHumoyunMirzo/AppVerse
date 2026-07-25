@@ -17,6 +17,7 @@ Creates a native webview window. Accepted options mirror `WindowOptions`:
 - `url`
 - `frameless`
 - `icon`
+- `visible`
 - `show_when_ready`
 - `init_scripts`
 
@@ -33,6 +34,7 @@ appverse.WindowOptions(
     url=None,
     frameless=False,
     icon=None,
+    visible=True,
     show_when_ready=False,
     init_scripts=(),
 )
@@ -51,12 +53,17 @@ window.emit("custom", payload)
 
 Built-in event names:
 
+- `START`: emitted when `run()` begins.
 - `READY`: emitted before the native run loop starts.
 - `CLOSE`: emitted before `terminate()`.
+- `SHOW`: emitted after `show()` is requested. Handlers receive
+  `(window, applied)`.
+- `HIDE`: emitted after `hide()` is requested. Handlers receive
+  `(window, applied)`.
 - `DESTROY`: emitted after the run loop exits or when `destroy()` is called.
 - `MESSAGE`: emitted when JavaScript calls `window.appverse.send(...)`.
 - `READY_TO_SHOW`: emitted when the document is ready and AppVerse reveals the
-  native window.
+  page content.
 - `ERROR`: reserved for framework error events.
 
 ## JavaScript Bridge
@@ -113,7 +120,9 @@ Sets the window size. Size hints are:
 ### `set_icon(icon: str | PathLike) -> bool`
 
 Attempts to set the native window icon. Returns `True` when supported and
-applied. Windows `.ico` files are supported by the current native layer.
+applied. Relative paths are resolved from the current working directory. Windows
+uses `.ico` directly and can convert common image formats when Pillow is
+installed with `appverse[icons]`.
 
 ### `set_frameless(frameless: bool = True) -> bool`
 
@@ -160,13 +169,29 @@ Sends an event from Python to JavaScript through `window.appverse`.
 
 ### `show() -> bool`
 
-Shows the native window. Returns `True` when the platform native layer applies
-the visibility change. Windows, macOS, and Linux are supported.
+Shows the native window. Use this for explicit visibility control after the
+window exists. Emits `SHOW`.
 
 ### `hide() -> bool`
 
-Hides the native window. Returns `True` when the platform native layer applies
-the visibility change. Windows, macOS, and Linux are supported.
+Hides the native window. `show_when_ready` uses construction-time native hidden
+startup and a preload reveal script to avoid early native-window flicker. Emits
+`HIDE`.
+
+## Hidden Startup
+
+Use `visible=False` when you want a window to stay hidden through `run()` until
+you explicitly call `show()`:
+
+```python
+window = appverse.create_window(visible=False, html="<h1>Hidden</h1>")
+window.run()
+```
+
+Use `show_when_ready=True` when you want AppVerse to create the native window
+hidden, show it when `run()` starts, and reveal the page content after the
+document is ready. This avoids waiting for browser readiness while the native
+window is still hidden.
 
 ### `terminate() -> None`
 

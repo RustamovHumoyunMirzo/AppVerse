@@ -42,6 +42,13 @@ pip install appverse
 Linux users also need WebKitGTK runtime libraries. See
 [Platform Support](docs/platform-support.md).
 
+Install optional icon conversion support when you want PNG/JPG icons to work on
+Windows:
+
+```bash
+pip install "appverse[icons]"
+```
+
 Local HTML files can be loaded directly:
 
 ```python
@@ -49,6 +56,9 @@ window = appverse.create_window(show_when_ready=True)
 window.load_html("ui/index.html")
 window.run()
 ```
+
+Use `visible=False` for windows that should remain hidden until `show()` is
+called.
 
 ## Local Development
 

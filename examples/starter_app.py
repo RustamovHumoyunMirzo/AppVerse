@@ -82,9 +82,14 @@ HTML = """
     });
 
     document.querySelector("#ping").addEventListener("click", async () => {
-      const result = await window.appverse.call("ping", new Date().toLocaleTimeString());
-      document.querySelector("#status").textContent = result.message;
-      await window.appverse.send("button-clicked", result);
+      try {
+        const result = await window.appverse.call("ping", new Date().toLocaleTimeString());
+        document.querySelector("#status").textContent = result.message;
+        await window.appverse.send("button-clicked", result);
+      } catch (error) {
+        document.querySelector("#status").textContent = error.message || String(error);
+        console.error(error);
+      }
     });
   </script>
 </body>
@@ -99,7 +104,6 @@ def main() -> None:
         height=640,
         debug=True,
         show_when_ready=True,
-        html=HTML,
     )
 
     @window.on(appverse.MESSAGE)
@@ -109,10 +113,11 @@ def main() -> None:
     @window.bind("ping")
     def _ping(timestamp: str) -> dict[str, str]:
         message = f"Python received a click at {timestamp}"
+        print(message)
         window.send("python:tick", {"message": message})
         return {"message": message}
 
-    window.show()
+    window.set_html(HTML)
     window.run()
 
 

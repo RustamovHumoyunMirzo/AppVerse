@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #if defined(_WIN32)
+#include <shellapi.h>
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <objc/message.h>
@@ -21,6 +22,10 @@
 namespace {
 
 constexpr const char *kCapsuleName = "appverse.WindowHandle";
+constexpr const char *kPreloadHtml =
+    "<!doctype html><html><head><meta charset=\"utf-8\"><style>"
+    "html,body{margin:0;width:100%;height:100%;background:#101418;}"
+    "</style></head><body></body></html>";
 
 struct BindingContext;
 
@@ -63,6 +68,38 @@ void raise_runtime_error(const std::exception &e) {
 
 PyObject *none_on_success() {
   Py_RETURN_NONE;
+}
+
+bool apply_visibility(WindowHandle *handle, bool visible) {
+#if defined(_WIN32)
+  auto result = handle->window->window();
+  result.ensure_ok();
+  auto *hwnd = static_cast<HWND>(result.value());
+  ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
+  return true;
+#elif defined(__APPLE__)
+  auto result = handle->window->window();
+  result.ensure_ok();
+  auto window = static_cast<id>(result.value());
+  using Fn = void (*)(id, SEL, id);
+  if (visible) {
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("makeKeyAndOrderFront:"), nil);
+  } else {
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("orderOut:"), nil);
+  }
+  return true;
+#elif defined(__linux__)
+  auto result = handle->window->window();
+  result.ensure_ok();
+  auto *window = static_cast<GtkWidget *>(result.value());
+  gtk_widget_set_visible(window, visible);
+  if (visible && GTK_IS_WINDOW(window)) {
+    gtk_window_present(GTK_WINDOW(window));
+  }
+  return true;
+#else
+  return false;
+#endif
 }
 
 void binding_callback(const std::string &id, const std::string &request, void *arg) {
@@ -109,17 +146,22 @@ void binding_callback(const std::string &id, const std::string &request, void *a
 
 PyObject *native_create_window(PyObject *, PyObject *args, PyObject *kwargs) {
   int debug = 0;
-  static const char *keywords[] = {"debug", nullptr};
+  int visible = 1;
+  static const char *keywords[] = {"debug", "visible", nullptr};
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|p", const_cast<char **>(keywords),
-                                   &debug)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|pp", const_cast<char **>(keywords),
+                                   &debug, &visible)) {
     return nullptr;
   }
 
   try {
-    auto *handle = new WindowHandle{
-        std::make_unique<webview::webview>(debug != 0, nullptr), {}};
-    return PyCapsule_New(handle, kCapsuleName, capsule_destructor);
+    auto window = std::make_unique<webview::webview>(debug != 0, nullptr);
+    window->set_html(kPreloadHtml);
+    auto handle = std::make_unique<WindowHandle>(WindowHandle{std::move(window), {}});
+    if (!visible) {
+      apply_visibility(handle.get(), false);
+    }
+    return PyCapsule_New(handle.release(), kCapsuleName, capsule_destructor);
   } catch (const std::exception &e) {
     raise_runtime_error(e);
     return nullptr;
@@ -432,8 +474,17 @@ PyObject *native_set_icon(PyObject *, PyObject *args) {
     std::wstring wide_path(static_cast<size_t>(length), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, path, -1, wide_path.data(), length);
 
-    HANDLE icon = LoadImageW(nullptr, wide_path.c_str(), IMAGE_ICON, 0, 0,
-                             LR_LOADFROMFILE | LR_DEFAULTSIZE);
+    HICON icon = static_cast<HICON>(
+        LoadImageW(nullptr, wide_path.c_str(), IMAGE_ICON, 0, 0,
+                   LR_LOADFROMFILE | LR_DEFAULTSIZE));
+    if (!icon) {
+      SHFILEINFOW info{};
+      DWORD_PTR ok = SHGetFileInfoW(wide_path.c_str(), 0, &info, sizeof(info),
+                                    SHGFI_ICON | SHGFI_LARGEICON);
+      if (ok) {
+        icon = info.hIcon;
+      }
+    }
     if (!icon) {
       Py_RETURN_FALSE;
     }
@@ -498,51 +549,15 @@ PyObject *native_set_visible(PyObject *, PyObject *args) {
     return nullptr;
   }
 
-#if defined(_WIN32)
   try {
-    auto result = handle->window->window();
-    result.ensure_ok();
-    auto *hwnd = static_cast<HWND>(result.value());
-    ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
-    Py_RETURN_TRUE;
-  } catch (const std::exception &e) {
-    raise_runtime_error(e);
-    return nullptr;
-  }
-#elif defined(__APPLE__)
-  try {
-    auto result = handle->window->window();
-    result.ensure_ok();
-    auto window = static_cast<id>(result.value());
-    if (visible) {
-      using Fn = void (*)(id, SEL, id);
-      reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("makeKeyAndOrderFront:"), nil);
-    } else {
-      using Fn = void (*)(id, SEL, id);
-      reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("orderOut:"), nil);
+    if (apply_visibility(handle, visible != 0)) {
+      Py_RETURN_TRUE;
     }
-    Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
   } catch (const std::exception &e) {
     raise_runtime_error(e);
     return nullptr;
   }
-#elif defined(__linux__)
-  try {
-    auto result = handle->window->window();
-    result.ensure_ok();
-    auto *window = static_cast<GtkWidget *>(result.value());
-    gtk_widget_set_visible(window, visible != 0);
-    if (visible && GTK_IS_WINDOW(window)) {
-      gtk_window_present(GTK_WINDOW(window));
-    }
-    Py_RETURN_TRUE;
-  } catch (const std::exception &e) {
-    raise_runtime_error(e);
-    return nullptr;
-  }
-#else
-  Py_RETURN_FALSE;
-#endif
 }
 
 PyMethodDef methods[] = {

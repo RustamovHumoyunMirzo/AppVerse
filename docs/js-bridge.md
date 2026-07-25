@@ -8,10 +8,18 @@ AppVerse injects `window.appverse` into pages loaded with `set_html` or
 Register a Python function:
 
 ```python
+window = appverse.create_window()
+
 @window.bind("lookup_user")
 def lookup_user(user_id: int) -> dict[str, object]:
     return {"id": user_id, "name": "Ada"}
+
+window.load_html("ui/index.html")
+window.run()
 ```
+
+Register bindings before loading HTML when page scripts or early user actions
+depend on them.
 
 Call it from JavaScript:
 
@@ -64,10 +72,10 @@ window.dispatch_eval("document.body.dataset.ready = 'true'")
 
 ## Ready To Show
 
-Use `show_when_ready=True` to hide the native window while the initial document is
-loading. AppVerse reveals the window after `DOMContentLoaded` and emits
-`appverse.READY_TO_SHOW`. Native visibility is supported on Windows, macOS, and
-Linux.
+Use `show_when_ready=True` to keep the document visually hidden while the initial
+HTML loads. AppVerse reveals the document after `DOMContentLoaded` and emits
+`appverse.READY_TO_SHOW`. The option creates the native window hidden, then shows
+it at `run()` after content and scripts have been installed.
 
 ```python
 window = appverse.create_window(show_when_ready=True)

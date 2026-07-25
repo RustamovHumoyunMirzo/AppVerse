@@ -32,6 +32,9 @@ classifiers = [
   "Topic :: Software Development :: User Interfaces",
 ]
 
+[project.optional-dependencies]
+icons = ["Pillow>=9.0"]
+
 [tool.scikit-build]
 cmake.version = ">=3.26"
 wheel.packages = ["src/appverse", "src/pyverse"]

@@ -19,8 +19,11 @@ HINT_MIN: Final[int] = _native.HINT_MIN
 HINT_MAX: Final[int] = _native.HINT_MAX
 HINT_FIXED: Final[int] = _native.HINT_FIXED
 
+START: Final[str] = "start"
 READY: Final[str] = "ready"
 CLOSE: Final[str] = "close"
+SHOW: Final[str] = "show"
+HIDE: Final[str] = "hide"
 DESTROY: Final[str] = "destroy"
 MESSAGE: Final[str] = "message"
 ERROR: Final[str] = "error"
@@ -68,6 +71,7 @@ READY_REVEAL_JS = r"""
   const reveal = () => {
     document.documentElement.style.opacity = "1";
     document.documentElement.style.visibility = "visible";
+    document.documentElement.style.background = "";
     if (window.appverse) {
       window.appverse.send("__appverse_ready_to_show", null).catch(() => {});
     }
@@ -98,6 +102,7 @@ class WindowOptions:
     url: str | None = None
     frameless: bool = False
     icon: str | os.PathLike[str] | None = None
+    visible: bool = True
     show_when_ready: bool = False
     init_scripts: tuple[str, ...] = ()
 
@@ -121,6 +126,7 @@ class Window:
         url: str | None = None,
         frameless: bool = False,
         icon: str | os.PathLike[str] | None = None,
+        visible: bool = True,
         show_when_ready: bool = False,
         init_scripts: tuple[str, ...] = (),
         options: WindowOptions | None = None,
@@ -136,19 +142,22 @@ class Window:
                 url=url,
                 frameless=frameless,
                 icon=icon,
+                visible=visible,
                 show_when_ready=show_when_ready,
                 init_scripts=init_scripts,
             )
 
         self.options = options
-        self._handle = _native.create_window(debug=options.debug)
+        native_visible = options.visible and not options.show_when_ready
+        self._handle = _native.create_window(debug=options.debug, visible=native_visible)
         self._closed = False
+        self._started = False
+        self._visible = native_visible
         self._events: DefaultDict[str, list[EventHandler]] = defaultdict(list)
         self._bindings: dict[str, BindingHandler] = {}
 
         self.init(APPVERSE_BRIDGE_JS)
         if options.show_when_ready:
-            self.hide()
             self.init(READY_REVEAL_JS)
         self.bind("__appverse_message", self._receive_message)
         self.set_title(options.title)
@@ -207,16 +216,23 @@ class Window:
         _native.set_size(self._handle, width, height, hint)
 
     def set_icon(self, icon: str | os.PathLike[str]) -> bool:
-        return bool(_native.set_icon(self._handle, str(icon)))
+        icon_path = self._prepare_icon(icon)
+        return bool(_native.set_icon(self._handle, str(icon_path)))
 
     def set_frameless(self, frameless: bool = True) -> bool:
         return bool(_native.set_frameless(self._handle, frameless))
 
     def show(self) -> bool:
-        return bool(_native.set_visible(self._handle, True))
+        applied = bool(_native.set_visible(self._handle, True))
+        self._visible = True
+        self.emit(SHOW, self, applied)
+        return applied
 
     def hide(self) -> bool:
-        return bool(_native.set_visible(self._handle, False))
+        applied = bool(_native.set_visible(self._handle, False))
+        self._visible = False
+        self.emit(HIDE, self, applied)
+        return applied
 
     def set_html(self, html: str) -> None:
         _native.set_html(self._handle, html)
@@ -268,7 +284,11 @@ class Window:
         _native.terminate(self._handle)
 
     def run(self) -> None:
+        self._started = True
+        self.emit(START, self)
         self.emit(READY, self)
+        if self.options.show_when_ready and self.options.visible and not self._visible:
+            self.show()
         try:
             _native.run(self._handle)
         finally:
@@ -283,10 +303,36 @@ class Window:
 
     def _receive_message(self, event: str, detail: Any = None) -> None:
         if event == "__appverse_ready_to_show":
-            self.show()
+            if self.options.visible and not self._visible:
+                self.show()
             self.emit(READY_TO_SHOW, self)
             return
         self.emit(MESSAGE, event, detail)
+
+    def _prepare_icon(self, icon: str | os.PathLike[str]) -> Path:
+        icon_path = Path(icon).expanduser()
+        if not icon_path.is_absolute():
+            icon_path = (Path.cwd() / icon_path).resolve()
+        else:
+            icon_path = icon_path.resolve()
+
+        if not icon_path.exists():
+            raise FileNotFoundError(f"Icon file does not exist: {icon_path}")
+
+        if os.name != "nt" or icon_path.suffix.lower() == ".ico":
+            return icon_path
+
+        try:
+            from PIL import Image
+        except ImportError:
+            return icon_path
+
+        cache_dir = Path(os.environ.get("APPVERSE_CACHE_DIR", Path.home() / ".appverse"))
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        ico_path = cache_dir / f"{icon_path.stem}.ico"
+        with Image.open(icon_path) as image:
+            image.save(ico_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
+        return ico_path
 
     def __enter__(self) -> "Window":
         return self
@@ -312,6 +358,9 @@ __all__ = [
     "READY",
     "READY_REVEAL_JS",
     "READY_TO_SHOW",
+    "SHOW",
+    "HIDE",
+    "START",
     "Window",
     "WindowOptions",
     "create_window",

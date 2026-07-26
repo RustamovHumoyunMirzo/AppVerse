@@ -2059,6 +2059,27 @@ PyObject *native_is_visible(PyObject *, PyObject *args) {
   }
 }
 
+PyObject *native_get_window_handle(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+    return PyLong_FromVoidPtr(result.value());
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
 PyObject *native_is_frameless(PyObject *, PyObject *args) {
   PyObject *capsule = nullptr;
   if (!PyArg_ParseTuple(args, "O", &capsule)) {
@@ -2306,6 +2327,8 @@ PyMethodDef methods[] = {
      "Return whether the native window is minimized."},
     {"is_visible", reinterpret_cast<PyCFunction>(native_is_visible), METH_VARARGS,
      "Return whether the native window is visible."},
+    {"get_window_handle", reinterpret_cast<PyCFunction>(native_get_window_handle),
+     METH_VARARGS, "Return the native platform window handle pointer."},
     {"is_frameless", reinterpret_cast<PyCFunction>(native_is_frameless), METH_VARARGS,
      "Return whether the native window is frameless."},
     {"has_shadow", reinterpret_cast<PyCFunction>(native_has_shadow), METH_VARARGS,

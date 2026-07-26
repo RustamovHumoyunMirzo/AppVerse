@@ -316,6 +316,20 @@ Returns whether the native window is minimized where supported.
 
 Returns whether the native window is visible.
 
+### `get_handle() -> int`
+
+Returns the native platform window handle as an integer pointer. This is an
+advanced escape hatch for integrations that need `ctypes`, `cffi`, or
+platform-specific native APIs.
+
+Platform values:
+
+- Windows: `HWND`
+- macOS: `NSWindow *`
+- Linux: `GtkWidget *` for the GTK window
+
+The value is only valid while the AppVerse window is alive.
+
 ### `is_frameless() -> bool`
 
 Returns whether native window frame decorations are disabled where supported.

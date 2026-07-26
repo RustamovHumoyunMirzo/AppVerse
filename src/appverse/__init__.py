@@ -396,6 +396,12 @@ class Window:
             return self._visible
         return bool(is_visible(self._handle))
 
+    def get_handle(self) -> int:
+        get_window_handle = getattr(_native, "get_window_handle", None)
+        if get_window_handle is None:
+            return 0
+        return int(get_window_handle(self._handle))
+
     def is_frameless(self) -> bool:
         is_frameless = getattr(_native, "is_frameless", None)
         if is_frameless is None:

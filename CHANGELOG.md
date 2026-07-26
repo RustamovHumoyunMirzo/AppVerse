@@ -18,6 +18,8 @@ The project follows semantic versioning.
   customization where the platform exposes real OS controls.
 - Added `set_shadow()` and `has_shadow()`/`hasShadow` for native window shadow
   control, with Linux-only named shadow style presets.
+- Added `get_handle()` for retrieving the native platform window handle as an
+  integer pointer.
 
 ### Changed
 

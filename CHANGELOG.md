@@ -2,7 +2,14 @@
 
 All notable changes to AppVerse will be documented in this file.
 
-The project follows semantic versioning while the public API matures.
+The project follows semantic versioning.
+
+## [1.0.0] - 2026-07-26
+
+### Changed
+
+- Promoted AppVerse from `1.0.0a0` to the stable `1.0.0` package release.
+- Updated package metadata and README status for the production-ready release.
 
 ## [1.0.0a0] - 2026-07-22
 

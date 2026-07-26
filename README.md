@@ -1,5 +1,7 @@
 # AppVerse
 
+[![CI](https://github.com/RustamovHumoyunMirzo/AppVerse/actions/workflows/ci.yml/badge.svg)](https://github.com/RustamovHumoyunMirzo/AppVerse/actions/workflows/ci.yml)
+
 AppVerse is a native app library for Python. It lets you open a
 small native desktop window, render HTML/CSS/JavaScript, and keep application
 logic in Python.
@@ -9,8 +11,8 @@ WebView2 on Windows, WKWebView on macOS, and WebKitGTK on Linux.
 
 ## Status
 
-AppVerse is early-stage alpha. The first public API focuses on a production
-packaging foundation and a minimal native window:
+AppVerse 1.0.0 provides a production-ready native webview foundation for Python
+desktop apps:
 
 ```python
 import appverse

@@ -4,15 +4,15 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "appverse"
-version = "1.0.0a0"
+version = "1.0.0"
 description = "Build native webview applications for Python."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-authors = [{ name = "RustamovHumoyunMirzo" }]
+authors = [{ name = "AppVerse contributors" }]
 keywords = ["desktop", "webview", "gui", "electron", "native", "html"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: MacOS X",
   "Environment :: Win32 (MS Windows)",
   "Environment :: X11 Applications",

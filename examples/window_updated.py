@@ -13,7 +13,6 @@ def main() -> None:
     window = appverse.create_window(
         width=960,
         height=640,
-        debug=False,
         devtools=False,
     )
 

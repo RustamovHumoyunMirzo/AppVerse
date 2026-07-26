@@ -1,6 +1,8 @@
 # AppVerse
 
 [![CI](https://github.com/RustamovHumoyunMirzo/AppVerse/actions/workflows/ci.yml/badge.svg)](https://github.com/RustamovHumoyunMirzo/AppVerse/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/appverse.svg)](https://pypi.org/project/appverse/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/appverse.svg)](https://pypi.org/project/appverse/)
 
 AppVerse is a native app library for Python. It lets you open a
 small native desktop window, render HTML/CSS/JavaScript, and keep application

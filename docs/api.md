@@ -223,9 +223,34 @@ Windows applies the color through DWM. Linux applies a GTK CSS border fallback.
 macOS returns `False` because AppKit does not expose a normal native window
 border color API.
 
+### `set_shadow(style: str | bool = True) -> bool`
+
+Enables or disables the native window shadow. Accepted values are `True`,
+`False`, `"system"`, `"none"`, `"small"`, `"medium"`, and `"large"`.
+
+```python
+window.set_shadow(True)
+window.set_shadow("large")
+window.set_shadow("none")
+```
+
+Platform behavior:
+
+- Windows: toggles DWM non-client rendering when supported. Shadow style strings
+  are treated as enabled/disabled only.
+- macOS: toggles `NSWindow.hasShadow`. Shadow style strings are treated as
+  enabled/disabled only.
+- Linux: applies the named shadow style presets through GTK CSS where the active
+  GTK/compositor path honors window shadows.
+
+### `has_shadow() -> bool`
+
+Returns whether AppVerse considers the native shadow enabled. `window.hasShadow`
+is also available as a read-only property.
+
 ### `set_window_captions(...) -> bool`
 
-Customizes native caption/control appearance where the platform allows it.
+Shows native window caption controls where the operating system exposes them.
 
 ```python
 window.set_window_captions(
@@ -243,18 +268,21 @@ Parameters:
 - `background`: caption/titlebar background color.
 - `symbols`: caption symbol/text color.
 - `border`: native border color.
-- `height`: preferred caption height.
-- `control_size`: preferred caption button size.
+- `height`: reserved for platforms that expose native caption sizing.
+- `control_size`: reserved for platforms that expose native caption button sizing.
 - `visible`: shows or hides native caption controls where supported.
 
 Platform behavior:
 
-- Windows: applies DWM caption, symbol/text, and border colors. Native caption
-  height and button size are controlled by the OS and are ignored.
-- macOS: can hide/show traffic-light buttons and apply a transparent titlebar
-  background. Symbol colors and sizing are controlled by AppKit and are ignored.
-- Linux: applies GTK CSS for headerbar/titlebar colors, height, and button size
-  when the active GTK/desktop decoration path honors app CSS.
+- Windows: `visible=True` restores real Win32 caption controls and applies DWM
+  caption, text/symbol, and border colors when supported. Native caption button
+  size is controlled by Windows.
+- macOS: shows or hides the native traffic-light buttons and can make the
+  titlebar background transparent. Symbol color and button size are controlled
+  by AppKit.
+- Linux: returns `False` for caption controls. Server-side controls are owned by
+  the compositor/window manager, and AppVerse intentionally does not fake them
+  with app CSS.
 
 ### `set_fullscreen(fullscreen: bool = True) -> bool`
 

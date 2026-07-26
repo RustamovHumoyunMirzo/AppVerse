@@ -35,6 +35,9 @@
 #if defined(_WIN32) && !defined(DWMWA_TEXT_COLOR)
 #define DWMWA_TEXT_COLOR 36
 #endif
+#if defined(_WIN32) && !defined(DWMWA_NCRENDERING_POLICY)
+#define DWMWA_NCRENDERING_POLICY 2
+#endif
 
 namespace {
 
@@ -64,6 +67,8 @@ struct WindowHandle {
   std::unique_ptr<webview::webview> window;
   std::unordered_map<std::string, std::unique_ptr<BindingContext>> bindings;
   bool fullscreenable = true;
+  bool shadow_enabled = true;
+  std::string shadow_style = "system";
 #if defined(_WIN32)
   bool fullscreen = false;
   HBRUSH background_brush = nullptr;
@@ -1288,6 +1293,19 @@ PyObject *native_set_window_captions(PyObject *, PyObject *args) {
 #if defined(_WIN32)
     auto *hwnd = static_cast<HWND>(result.value());
     bool applied = false;
+    if (visible >= 0) {
+      LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+      if (visible != 0) {
+        style |= (WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+      } else {
+        style &= ~(WS_CAPTION | WS_THICKFRAME);
+        style |= (WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+      }
+      SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+      applied = true;
+    }
     if (has_background) {
       COLORREF value = RGB(background.red, background.green, background.blue);
       applied = SUCCEEDED(DwmSetWindowAttribute(
@@ -1354,52 +1372,97 @@ PyObject *native_set_window_captions(PyObject *, PyObject *args) {
     }
     Py_RETURN_FALSE;
 #elif defined(__linux__)
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_set_shadow(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  PyObject *style_object = Py_True;
+  if (!PyArg_ParseTuple(args, "O|O", &capsule, &style_object)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  bool enabled = true;
+  std::string style = "system";
+  if (PyBool_Check(style_object)) {
+    enabled = style_object == Py_True;
+    style = enabled ? "system" : "none";
+  } else if (style_object == Py_None) {
+    enabled = false;
+    style = "none";
+  } else if (PyUnicode_Check(style_object)) {
+    const char *style_text = PyUnicode_AsUTF8(style_object);
+    if (!style_text) {
+      return nullptr;
+    }
+    style = normalized_text(style_text);
+    enabled = !(style == "none" || style == "off" || style == "false" || style == "0");
+  } else {
+    PyErr_SetString(PyExc_TypeError, "shadow style must be bool, str, or None");
+    return nullptr;
+  }
+
+  if (!(style == "none" || style == "off" || style == "false" || style == "0" ||
+        style == "system" || style == "default" || style == "small" ||
+        style == "medium" || style == "large")) {
+    PyErr_SetString(PyExc_ValueError,
+                    "shadow style must be one of: none, system, small, medium, large");
+    return nullptr;
+  }
+
+  handle->shadow_enabled = enabled;
+  handle->shadow_style = style;
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    int policy = enabled ? 2 : 1;  // DWMNCRP_ENABLED / DWMNCRP_DISABLED
+    HRESULT ok = DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY,
+                                       &policy, sizeof(policy));
+    if (SUCCEEDED(ok)) {
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    using Fn = void (*)(id, SEL, bool);
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("setHasShadow:"), enabled);
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
     auto *window = static_cast<GtkWidget *>(result.value());
     if (!GTK_IS_WINDOW(window)) {
       Py_RETURN_FALSE;
     }
-    char css[512];
-    int offset = snprintf(css, sizeof(css), "headerbar, .titlebar {");
-    if (has_background && offset > 0 && offset < static_cast<int>(sizeof(css))) {
-      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
-                         "background-color: rgba(%u, %u, %u, %.4f);",
-                         static_cast<unsigned int>(background.red),
-                         static_cast<unsigned int>(background.green),
-                         static_cast<unsigned int>(background.blue),
-                         static_cast<double>(background.alpha) / 255.0);
+
+    const char *shadow_css = "none";
+    if (enabled) {
+      if (style == "small") {
+        shadow_css = "0 3px 12px rgba(0,0,0,0.24)";
+      } else if (style == "large") {
+        shadow_css = "0 18px 54px rgba(0,0,0,0.38)";
+      } else {
+        shadow_css = "0 10px 32px rgba(0,0,0,0.32)";
+      }
     }
-    if (has_symbol && offset > 0 && offset < static_cast<int>(sizeof(css))) {
-      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
-                         "color: rgba(%u, %u, %u, %.4f);",
-                         static_cast<unsigned int>(symbol.red),
-                         static_cast<unsigned int>(symbol.green),
-                         static_cast<unsigned int>(symbol.blue),
-                         static_cast<double>(symbol.alpha) / 255.0);
-    }
-    if (has_border && offset > 0 && offset < static_cast<int>(sizeof(css))) {
-      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
-                         "border-color: rgba(%u, %u, %u, %.4f);",
-                         static_cast<unsigned int>(border.red),
-                         static_cast<unsigned int>(border.green),
-                         static_cast<unsigned int>(border.blue),
-                         static_cast<double>(border.alpha) / 255.0);
-    }
-    if (height > 0 && offset > 0 && offset < static_cast<int>(sizeof(css))) {
-      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
-                         "min-height: %dpx;", height);
-    }
-    if (visible >= 0 && offset > 0 && offset < static_cast<int>(sizeof(css))) {
-      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
-                         "opacity: %.1f;", visible == 0 ? 0.0 : 1.0);
-    }
-    if (offset > 0 && offset < static_cast<int>(sizeof(css))) {
-      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset), "}");
-    }
-    if (button_size > 0 && offset > 0 && offset < static_cast<int>(sizeof(css))) {
-      snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
-               "headerbar button, .titlebar button { min-width: %dpx; min-height: %dpx; }",
-               button_size, button_size);
-    }
+
+    char css[192];
+    snprintf(css, sizeof(css), "window { box-shadow: %s; }", shadow_css);
     GtkCssProvider *provider = gtk_css_provider_new();
 #if GTK_MAJOR_VERSION < 4
     gtk_css_provider_load_from_data(provider, css, -1, nullptr);
@@ -2038,6 +2101,38 @@ PyObject *native_is_frameless(PyObject *, PyObject *args) {
   }
 }
 
+PyObject *native_has_shadow(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    if (cocoa_bool(window, "hasShadow")) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    if (handle->shadow_enabled) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
 PyObject *native_start_drag(PyObject *, PyObject *args) {
   PyObject *capsule = nullptr;
   if (!PyArg_ParseTuple(args, "O", &capsule)) {
@@ -2183,6 +2278,8 @@ PyMethodDef methods[] = {
      METH_VARARGS, "Set native window border color."},
     {"set_window_captions", reinterpret_cast<PyCFunction>(native_set_window_captions),
      METH_VARARGS, "Set native window caption/control appearance."},
+    {"set_shadow", reinterpret_cast<PyCFunction>(native_set_shadow), METH_VARARGS,
+     "Set native window shadow state/style."},
     {"set_visible", reinterpret_cast<PyCFunction>(native_set_visible), METH_VARARGS,
      "Toggle native window visibility."},
     {"set_position", reinterpret_cast<PyCFunction>(native_set_position), METH_VARARGS,
@@ -2211,6 +2308,8 @@ PyMethodDef methods[] = {
      "Return whether the native window is visible."},
     {"is_frameless", reinterpret_cast<PyCFunction>(native_is_frameless), METH_VARARGS,
      "Return whether the native window is frameless."},
+    {"has_shadow", reinterpret_cast<PyCFunction>(native_has_shadow), METH_VARARGS,
+     "Return whether the native window shadow is enabled."},
     {"start_drag", reinterpret_cast<PyCFunction>(native_start_drag), METH_VARARGS,
      "Start a native window drag operation."},
     {"show_window_menu", reinterpret_cast<PyCFunction>(native_show_window_menu), METH_VARARGS,

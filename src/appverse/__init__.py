@@ -161,7 +161,6 @@ BLOCK_FULLSCREEN_KEYS_JS = r"""
 })();
 """
 
-
 @dataclass
 class WindowOptions:
     title: str | None = None
@@ -360,6 +359,12 @@ class Window:
     def set_border_color(self, color: str) -> bool:
         return bool(_native.set_border_color(self._handle, color))
 
+    def set_shadow(self, style: str | bool = True) -> bool:
+        set_shadow = getattr(_native, "set_shadow", None)
+        if set_shadow is None:
+            return False
+        return bool(set_shadow(self._handle, style))
+
     def set_window_captions(
         self,
         *,
@@ -396,6 +401,16 @@ class Window:
         if is_frameless is None:
             return self.options.frameless
         return bool(is_frameless(self._handle))
+
+    def has_shadow(self) -> bool:
+        has_shadow = getattr(_native, "has_shadow", None)
+        if has_shadow is None:
+            return True
+        return bool(has_shadow(self._handle))
+
+    @property
+    def hasShadow(self) -> bool:
+        return self.has_shadow()
 
     def is_minimized(self) -> bool:
         is_minimized = getattr(_native, "is_minimized", None)

@@ -17,8 +17,6 @@ def main() -> None:
         devtools=False,
     )
 
-    window.set_background_color("#151515")
-    window.set_border_color("#cccccc")
     window.load_html(r"examples\html\index.html")
     window.run()
 

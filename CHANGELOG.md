@@ -14,8 +14,10 @@ The project follows semantic versioning.
   fallback on Linux.
 - Added native window state getters and a `fullscreenable` window option for
   controlling fullscreen entry.
-- Added `set_window_captions()` for native caption/control appearance
-  customization across supported platform surfaces.
+- Added `set_window_captions()` for native caption controls and titlebar color
+  customization where the platform exposes real OS controls.
+- Added `set_shadow()` and `has_shadow()`/`hasShadow` for native window shadow
+  control, with Linux-only named shadow style presets.
 
 ### Changed
 

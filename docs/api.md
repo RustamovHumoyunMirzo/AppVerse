@@ -223,6 +223,21 @@ Windows applies the color through DWM. Linux applies a GTK CSS border fallback.
 macOS returns `False` because AppKit does not expose a normal native window
 border color API.
 
+### `set_devtools_enabled(enabled: bool = True) -> bool`
+
+Enables or disables native webview developer tooling after the window has been
+created.
+
+On Windows this also toggles WebView2 browser accelerator keys, so disabling
+devtools blocks shortcuts such as F12 and Ctrl+Shift+I. On macOS and Linux it
+toggles the backend developer-extras setting where the embedded webview exposes
+it.
+
+### `is_devtools_enabled() -> bool`
+
+Returns whether AppVerse currently considers native webview developer tooling
+enabled.
+
 ### `set_shadow(style: str | bool = True) -> bool`
 
 Enables or disables the native window shadow. Accepted values are `True`,
@@ -364,8 +379,8 @@ Windows currently shows the OS system menu; unsupported platforms return
 
 ### `open_devtools() -> bool`
 
-Returns whether developer tooling was requested. Enable it with `debug=True` or
-`devtools=True` when creating the window.
+Returns whether native webview developer tooling is enabled. Enable it with
+`debug=True`, `devtools=True`, or `set_devtools_enabled(True)`.
 
 ## App Region CSS
 

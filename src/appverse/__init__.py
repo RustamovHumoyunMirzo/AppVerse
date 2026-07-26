@@ -359,6 +359,20 @@ class Window:
     def set_border_color(self, color: str) -> bool:
         return bool(_native.set_border_color(self._handle, color))
 
+    def set_devtools_enabled(self, enabled: bool = True) -> bool:
+        set_devtools_enabled = getattr(_native, "set_devtools_enabled", None)
+        self.options.devtools = enabled
+        self.options.debug = enabled
+        if set_devtools_enabled is None:
+            return False
+        return bool(set_devtools_enabled(self._handle, enabled))
+
+    def is_devtools_enabled(self) -> bool:
+        is_devtools_enabled = getattr(_native, "is_devtools_enabled", None)
+        if is_devtools_enabled is None:
+            return self.options.debug or self.options.devtools
+        return bool(is_devtools_enabled(self._handle))
+
     def set_shadow(self, style: str | bool = True) -> bool:
         set_shadow = getattr(_native, "set_shadow", None)
         if set_shadow is None:
@@ -500,7 +514,7 @@ class Window:
         return bool(show_window_menu(self._handle, x, y))
 
     def open_devtools(self) -> bool:
-        return self.options.debug or self.options.devtools
+        return self.is_devtools_enabled()
 
     def set_html(self, html: str) -> None:
         if not self._title_explicit:

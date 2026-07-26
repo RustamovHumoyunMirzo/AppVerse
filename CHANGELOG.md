@@ -20,6 +20,8 @@ The project follows semantic versioning.
   control, with Linux-only named shadow style presets.
 - Added `get_handle()` for retrieving the native platform window handle as an
   integer pointer.
+- Added native devtools toggling with WebView2 accelerator-key blocking when
+  devtools are disabled.
 
 ### Changed
 

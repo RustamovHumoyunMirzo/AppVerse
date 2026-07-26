@@ -67,6 +67,7 @@ struct WindowHandle {
   std::unique_ptr<webview::webview> window;
   std::unordered_map<std::string, std::unique_ptr<BindingContext>> bindings;
   bool fullscreenable = true;
+  bool devtools_enabled = false;
   bool shadow_enabled = true;
   std::string shadow_style = "system";
 #if defined(_WIN32)
@@ -418,6 +419,75 @@ bool apply_visibility(WindowHandle *handle, bool visible) {
 #endif
 }
 
+bool apply_devtools_enabled(WindowHandle *handle, bool enabled) {
+  if (!handle || !handle->window) {
+    return false;
+  }
+  handle->devtools_enabled = enabled;
+
+  auto result = handle->window->browser_controller();
+  result.ensure_ok();
+#if defined(_WIN32)
+  auto *controller = static_cast<ICoreWebView2Controller *>(result.value());
+  if (!controller) {
+    return false;
+  }
+
+  ICoreWebView2 *webview = nullptr;
+  HRESULT hr = controller->get_CoreWebView2(&webview);
+  if (FAILED(hr) || !webview) {
+    return false;
+  }
+
+  ICoreWebView2Settings *settings = nullptr;
+  hr = webview->get_Settings(&settings);
+  webview->Release();
+  if (FAILED(hr) || !settings) {
+    return false;
+  }
+
+  bool applied = SUCCEEDED(settings->put_AreDevToolsEnabled(enabled ? TRUE : FALSE));
+
+  ICoreWebView2Settings3 *settings3 = nullptr;
+  hr = settings->QueryInterface(IID_ICoreWebView2Settings3,
+                                reinterpret_cast<void **>(&settings3));
+  if (SUCCEEDED(hr) && settings3) {
+    applied = SUCCEEDED(settings3->put_AreBrowserAcceleratorKeysEnabled(
+                  enabled ? TRUE : FALSE)) &&
+              applied;
+    settings3->Release();
+  }
+
+  settings->Release();
+  return applied;
+#elif defined(__APPLE__)
+  auto webview = static_cast<id>(result.value());
+  id config = cocoa_send_id(webview, "configuration");
+  id preferences = cocoa_send_id(config, "preferences");
+  id number = nullptr;
+  using NumberFn = id (*)(id, SEL, bool);
+  number = reinterpret_cast<NumberFn>(objc_msgSend)(
+      cocoa_class("NSNumber"), sel_registerName("numberWithBool:"), enabled);
+  id key = cocoa_string("developerExtrasEnabled");
+  using SetValueFn = void (*)(id, SEL, id, id);
+  reinterpret_cast<SetValueFn>(objc_msgSend)(
+      preferences, sel_registerName("setValue:forKey:"), number, key);
+  cocoa_release(key);
+  return true;
+#elif defined(__linux__)
+  auto *webview = static_cast<WebKitWebView *>(result.value());
+  if (!WEBKIT_IS_WEB_VIEW(webview)) {
+    return false;
+  }
+  WebKitSettings *settings = webkit_web_view_get_settings(webview);
+  webkit_settings_set_enable_developer_extras(settings, enabled);
+  webkit_settings_set_enable_write_console_messages_to_stdout(settings, enabled);
+  return true;
+#else
+  return false;
+#endif
+}
+
 void binding_callback(const std::string &id, const std::string &request, void *arg) {
   auto *context = static_cast<BindingContext *>(arg);
   if (!context || !context->handle || !context->handle->window || !context->callable) {
@@ -475,6 +545,7 @@ PyObject *native_create_window(PyObject *, PyObject *args, PyObject *kwargs) {
     window->set_html(kPreloadHtml);
     auto handle = std::make_unique<WindowHandle>();
     handle->window = std::move(window);
+    apply_devtools_enabled(handle.get(), debug != 0);
     if (!visible) {
       apply_visibility(handle.get(), false);
     }
@@ -499,6 +570,46 @@ PyObject *native_destroy(PyObject *, PyObject *args) {
   handle->bindings.clear();
   handle->window.reset();
   return none_on_success();
+}
+
+PyObject *native_set_devtools_enabled(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  int enabled = 0;
+  if (!PyArg_ParseTuple(args, "Op", &capsule, &enabled)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    if (apply_devtools_enabled(handle, enabled != 0)) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_is_devtools_enabled(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  if (handle->devtools_enabled) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
 }
 
 PyObject *native_set_title(PyObject *, PyObject *args) {
@@ -2265,6 +2376,10 @@ PyMethodDef methods[] = {
      METH_VARARGS | METH_KEYWORDS, "Create a native webview window handle."},
     {"destroy", reinterpret_cast<PyCFunction>(native_destroy), METH_VARARGS,
      "Destroy a native webview window handle."},
+    {"set_devtools_enabled", reinterpret_cast<PyCFunction>(native_set_devtools_enabled),
+     METH_VARARGS, "Toggle native webview developer tools and debug accelerators."},
+    {"is_devtools_enabled", reinterpret_cast<PyCFunction>(native_is_devtools_enabled),
+     METH_VARARGS, "Return whether native webview developer tools are enabled."},
     {"set_title", reinterpret_cast<PyCFunction>(native_set_title), METH_VARARGS,
      "Set the native window title."},
     {"set_size", reinterpret_cast<PyCFunction>(native_set_size), METH_VARARGS,

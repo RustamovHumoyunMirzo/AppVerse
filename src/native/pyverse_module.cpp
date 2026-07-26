@@ -318,6 +318,18 @@ bool parse_background_color(const char *color_text, RgbaColor *color) {
   return false;
 }
 
+bool parse_optional_color(const char *color_text, RgbaColor *color, bool *has_color) {
+  if (!color || !has_color) {
+    return false;
+  }
+  *has_color = false;
+  if (!color_text || color_text[0] == '\0') {
+    return true;
+  }
+  *has_color = true;
+  return parse_background_color(color_text, color);
+}
+
 #if defined(__APPLE__)
 struct CocoaPoint {
   double x;
@@ -1230,6 +1242,187 @@ PyObject *native_set_border_color(PyObject *, PyObject *args) {
   }
 }
 
+PyObject *native_set_window_captions(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  const char *background_text = nullptr;
+  const char *symbol_text = nullptr;
+  const char *border_text = nullptr;
+  int height = 0;
+  int button_size = 0;
+  int visible = -1;
+  if (!PyArg_ParseTuple(args, "Ozzz|iii", &capsule, &background_text, &symbol_text,
+                        &border_text, &height, &button_size, &visible)) {
+    return nullptr;
+  }
+
+  RgbaColor background{};
+  RgbaColor symbol{};
+  RgbaColor border{};
+  bool has_background = false;
+  bool has_symbol = false;
+  bool has_border = false;
+  try {
+    if (!parse_optional_color(background_text, &background, &has_background) ||
+        !parse_optional_color(symbol_text, &symbol, &has_symbol) ||
+        !parse_optional_color(border_text, &border, &has_border)) {
+      PyErr_SetString(PyExc_ValueError,
+                      "caption colors must be #RRGGBB, #RRGGBBAA, "
+                      "rgb(...), rgba(...), transparent, or None");
+      return nullptr;
+    }
+  } catch (const std::exception &) {
+    PyErr_SetString(PyExc_ValueError,
+                    "caption colors must be #RRGGBB, #RRGGBBAA, "
+                    "rgb(...), rgba(...), transparent, or None");
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    bool applied = false;
+    if (has_background) {
+      COLORREF value = RGB(background.red, background.green, background.blue);
+      applied = SUCCEEDED(DwmSetWindowAttribute(
+                    hwnd, DWMWA_CAPTION_COLOR, &value, sizeof(value))) ||
+                applied;
+    }
+    if (has_symbol) {
+      COLORREF value = RGB(symbol.red, symbol.green, symbol.blue);
+      applied = SUCCEEDED(DwmSetWindowAttribute(
+                    hwnd, DWMWA_TEXT_COLOR, &value, sizeof(value))) ||
+                applied;
+    }
+    if (has_border) {
+      COLORREF value = RGB(border.red, border.green, border.blue);
+      applied = SUCCEEDED(DwmSetWindowAttribute(
+                    hwnd, DWMWA_BORDER_COLOR, &value, sizeof(value))) ||
+                applied;
+    }
+    if (applied) {
+      InvalidateRect(hwnd, nullptr, TRUE);
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    bool applied = false;
+    if (visible >= 0) {
+      using ButtonFn = id (*)(id, SEL, unsigned long long);
+      using HiddenFn = void (*)(id, SEL, bool);
+      unsigned long long button_types[] = {0ULL, 1ULL, 2ULL};
+      for (unsigned long long button_type : button_types) {
+        id button = reinterpret_cast<ButtonFn>(objc_msgSend)(
+            window, sel_registerName("standardWindowButton:"), button_type);
+        if (button) {
+          reinterpret_cast<HiddenFn>(objc_msgSend)(
+              button, sel_registerName("setHidden:"), visible == 0);
+          applied = true;
+        }
+      }
+    }
+    if (has_background) {
+      using BoolFn = void (*)(id, SEL, bool);
+      reinterpret_cast<BoolFn>(objc_msgSend)(
+          window, sel_registerName("setTitlebarAppearsTransparent:"), true);
+      reinterpret_cast<BoolFn>(objc_msgSend)(
+          window, sel_registerName("setOpaque:"), background.alpha == 255);
+
+      id color_class = cocoa_class("NSColor");
+      using ColorFn = id (*)(id, SEL, double, double, double, double);
+      id ns_color = reinterpret_cast<ColorFn>(objc_msgSend)(
+          color_class,
+          sel_registerName("colorWithCalibratedRed:green:blue:alpha:"),
+          static_cast<double>(background.red) / 255.0,
+          static_cast<double>(background.green) / 255.0,
+          static_cast<double>(background.blue) / 255.0,
+          static_cast<double>(background.alpha) / 255.0);
+      using SetColorFn = void (*)(id, SEL, id);
+      reinterpret_cast<SetColorFn>(objc_msgSend)(
+          window, sel_registerName("setBackgroundColor:"), ns_color);
+      applied = true;
+    }
+    if (applied) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (!GTK_IS_WINDOW(window)) {
+      Py_RETURN_FALSE;
+    }
+    char css[512];
+    int offset = snprintf(css, sizeof(css), "headerbar, .titlebar {");
+    if (has_background && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "background-color: rgba(%u, %u, %u, %.4f);",
+                         static_cast<unsigned int>(background.red),
+                         static_cast<unsigned int>(background.green),
+                         static_cast<unsigned int>(background.blue),
+                         static_cast<double>(background.alpha) / 255.0);
+    }
+    if (has_symbol && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "color: rgba(%u, %u, %u, %.4f);",
+                         static_cast<unsigned int>(symbol.red),
+                         static_cast<unsigned int>(symbol.green),
+                         static_cast<unsigned int>(symbol.blue),
+                         static_cast<double>(symbol.alpha) / 255.0);
+    }
+    if (has_border && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "border-color: rgba(%u, %u, %u, %.4f);",
+                         static_cast<unsigned int>(border.red),
+                         static_cast<unsigned int>(border.green),
+                         static_cast<unsigned int>(border.blue),
+                         static_cast<double>(border.alpha) / 255.0);
+    }
+    if (height > 0 && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "min-height: %dpx;", height);
+    }
+    if (visible >= 0 && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "opacity: %.1f;", visible == 0 ? 0.0 : 1.0);
+    }
+    if (offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset), "}");
+    }
+    if (button_size > 0 && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+               "headerbar button, .titlebar button { min-width: %dpx; min-height: %dpx; }",
+               button_size, button_size);
+    }
+    GtkCssProvider *provider = gtk_css_provider_new();
+#if GTK_MAJOR_VERSION < 4
+    gtk_css_provider_load_from_data(provider, css, -1, nullptr);
+    GtkStyleContext *context = gtk_widget_get_style_context(window);
+    gtk_style_context_add_provider(
+        context, GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#else
+    gtk_css_provider_load_from_data(provider, css, -1);
+    gtk_style_context_add_provider_for_display(
+        gtk_widget_get_display(window), GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#endif
+    g_object_unref(provider);
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
 PyObject *native_set_visible(PyObject *, PyObject *args) {
   PyObject *capsule = nullptr;
   int visible = 0;
@@ -1988,6 +2181,8 @@ PyMethodDef methods[] = {
      METH_VARARGS, "Set native window background color."},
     {"set_border_color", reinterpret_cast<PyCFunction>(native_set_border_color),
      METH_VARARGS, "Set native window border color."},
+    {"set_window_captions", reinterpret_cast<PyCFunction>(native_set_window_captions),
+     METH_VARARGS, "Set native window caption/control appearance."},
     {"set_visible", reinterpret_cast<PyCFunction>(native_set_visible), METH_VARARGS,
      "Toggle native window visibility."},
     {"set_position", reinterpret_cast<PyCFunction>(native_set_position), METH_VARARGS,

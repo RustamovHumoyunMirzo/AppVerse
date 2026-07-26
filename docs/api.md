@@ -223,6 +223,39 @@ Windows applies the color through DWM. Linux applies a GTK CSS border fallback.
 macOS returns `False` because AppKit does not expose a normal native window
 border color API.
 
+### `set_window_captions(...) -> bool`
+
+Customizes native caption/control appearance where the platform allows it.
+
+```python
+window.set_window_captions(
+    background="#151515",
+    symbols="#ffffff",
+    border="#303030",
+    height=36,
+    control_size=28,
+    visible=True,
+)
+```
+
+Parameters:
+
+- `background`: caption/titlebar background color.
+- `symbols`: caption symbol/text color.
+- `border`: native border color.
+- `height`: preferred caption height.
+- `control_size`: preferred caption button size.
+- `visible`: shows or hides native caption controls where supported.
+
+Platform behavior:
+
+- Windows: applies DWM caption, symbol/text, and border colors. Native caption
+  height and button size are controlled by the OS and are ignored.
+- macOS: can hide/show traffic-light buttons and apply a transparent titlebar
+  background. Symbol colors and sizing are controlled by AppKit and are ignored.
+- Linux: applies GTK CSS for headerbar/titlebar colors, height, and button size
+  when the active GTK/desktop decoration path honors app CSS.
+
 ### `set_fullscreen(fullscreen: bool = True) -> bool`
 
 Toggles fullscreen/maximized presentation where supported.

@@ -360,6 +360,31 @@ class Window:
     def set_border_color(self, color: str) -> bool:
         return bool(_native.set_border_color(self._handle, color))
 
+    def set_window_captions(
+        self,
+        *,
+        background: str | None = None,
+        symbols: str | None = None,
+        border: str | None = None,
+        height: int | None = None,
+        control_size: int | None = None,
+        visible: bool | None = None,
+    ) -> bool:
+        set_window_captions = getattr(_native, "set_window_captions", None)
+        if set_window_captions is None:
+            return False
+        return bool(
+            set_window_captions(
+                self._handle,
+                background,
+                symbols,
+                border,
+                height or 0,
+                control_size or 0,
+                -1 if visible is None else int(visible),
+            )
+        )
+
     def is_visible(self) -> bool:
         is_visible = getattr(_native, "is_visible", None)
         if is_visible is None:

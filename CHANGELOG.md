@@ -14,6 +14,8 @@ The project follows semantic versioning.
   fallback on Linux.
 - Added native window state getters and a `fullscreenable` window option for
   controlling fullscreen entry.
+- Added `set_window_captions()` for native caption/control appearance
+  customization across supported platform surfaces.
 
 ### Changed
 

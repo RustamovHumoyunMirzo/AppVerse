@@ -12,11 +12,18 @@ The project follows semantic versioning.
   color support.
 - Added `set_border_color()` for DWM border colors on Windows and a GTK border
   fallback on Linux.
+- Added native window state getters and a `fullscreenable` window option for
+  controlling fullscreen entry.
 
 ### Changed
 
 - Promoted AppVerse from `1.0.0a0` to the stable `1.0.0` package release.
 - Updated package metadata and README status for the production-ready release.
+
+### Fixed
+
+- Fixed Linux wheel builds by avoiding backdrop enum names that collide with
+  platform macros.
 
 ## [1.0.0a0] - 2026-07-22
 

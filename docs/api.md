@@ -24,6 +24,7 @@ Creates a native webview window. Accepted options mirror `WindowOptions`:
 - `url`
 - `frameless`
 - `fullscreen`
+- `fullscreenable`
 - `icon`
 - `visible`
 - `show_when_ready`
@@ -49,6 +50,7 @@ appverse.WindowOptions(
     url=None,
     frameless=False,
     fullscreen=False,
+    fullscreenable=True,
     icon=None,
     visible=True,
     show_when_ready=False,
@@ -224,6 +226,38 @@ border color API.
 ### `set_fullscreen(fullscreen: bool = True) -> bool`
 
 Toggles fullscreen/maximized presentation where supported.
+
+### `set_fullscreenable(fullscreenable: bool = True) -> bool`
+
+Controls whether AppVerse allows native fullscreen. When disabled,
+`set_fullscreen(True)` returns `False`; AppVerse also prevents the F11 browser
+fullscreen key inside the webview. macOS native fullscreen entry is disabled
+through window collection behavior where AppKit supports it.
+
+### `is_fullscreenable() -> bool`
+
+Returns whether fullscreen is currently allowed.
+
+### `is_fullscreen() -> bool`
+
+Returns whether the native window is currently fullscreen where the backend can
+report that state.
+
+### `is_maximized() -> bool`
+
+Returns whether the native window is maximized where supported.
+
+### `is_minimized() -> bool`
+
+Returns whether the native window is minimized where supported.
+
+### `is_visible() -> bool`
+
+Returns whether the native window is visible.
+
+### `is_frameless() -> bool`
+
+Returns whether native window frame decorations are disabled where supported.
 
 ### `minimize() -> bool`
 

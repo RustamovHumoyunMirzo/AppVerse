@@ -147,6 +147,20 @@ READY_REVEAL_JS = r"""
 })();
 """
 
+BLOCK_FULLSCREEN_KEYS_JS = r"""
+(() => {
+  window.__appverse_fullscreenable = false;
+  if (window.__appverse_fullscreen_guard_installed) return;
+  window.__appverse_fullscreen_guard_installed = true;
+  window.addEventListener("keydown", (event) => {
+    if (window.__appverse_fullscreenable === false && event.key === "F11") {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
+})();
+"""
+
 
 @dataclass
 class WindowOptions:
@@ -166,6 +180,7 @@ class WindowOptions:
     url: str | None = None
     frameless: bool = False
     fullscreen: bool = False
+    fullscreenable: bool = True
     icon: str | os.PathLike[str] | None = None
     visible: bool = True
     show_when_ready: bool = False
@@ -198,6 +213,7 @@ class Window:
         url: str | None = None,
         frameless: bool = False,
         fullscreen: bool = False,
+        fullscreenable: bool = True,
         icon: str | os.PathLike[str] | None = None,
         visible: bool = True,
         show_when_ready: bool = False,
@@ -222,6 +238,7 @@ class Window:
                 url=url,
                 frameless=frameless,
                 fullscreen=fullscreen,
+                fullscreenable=fullscreenable,
                 icon=icon,
                 visible=visible,
                 show_when_ready=show_when_ready,
@@ -244,6 +261,8 @@ class Window:
         self.init(APPVERSE_BRIDGE_JS)
         if options.show_when_ready:
             self.init(READY_REVEAL_JS)
+        if not options.fullscreenable:
+            self.init(BLOCK_FULLSCREEN_KEYS_JS)
         self.bind("__appverse_message", self._receive_message)
         self.bind("__appverse_start_drag", self._start_drag)
         self.bind("__appverse_show_window_menu", self._show_window_menu)
@@ -263,6 +282,7 @@ class Window:
 
         if options.frameless:
             self.set_frameless(True)
+        self.set_fullscreenable(options.fullscreenable)
         if options.fullscreen:
             self.set_fullscreen(True)
         if options.icon is not None:
@@ -340,6 +360,42 @@ class Window:
     def set_border_color(self, color: str) -> bool:
         return bool(_native.set_border_color(self._handle, color))
 
+    def is_visible(self) -> bool:
+        is_visible = getattr(_native, "is_visible", None)
+        if is_visible is None:
+            return self._visible
+        return bool(is_visible(self._handle))
+
+    def is_frameless(self) -> bool:
+        is_frameless = getattr(_native, "is_frameless", None)
+        if is_frameless is None:
+            return self.options.frameless
+        return bool(is_frameless(self._handle))
+
+    def is_minimized(self) -> bool:
+        is_minimized = getattr(_native, "is_minimized", None)
+        if is_minimized is None:
+            return False
+        return bool(is_minimized(self._handle))
+
+    def is_maximized(self) -> bool:
+        is_maximized = getattr(_native, "is_maximized", None)
+        if is_maximized is None:
+            return False
+        return bool(is_maximized(self._handle))
+
+    def is_fullscreen(self) -> bool:
+        is_fullscreen = getattr(_native, "is_fullscreen", None)
+        if is_fullscreen is None:
+            return False
+        return bool(is_fullscreen(self._handle))
+
+    def is_fullscreenable(self) -> bool:
+        is_fullscreenable = getattr(_native, "is_fullscreenable", None)
+        if is_fullscreenable is None:
+            return self.options.fullscreenable
+        return bool(is_fullscreenable(self._handle))
+
     def show(self) -> bool:
         applied = bool(_native.set_visible(self._handle, True))
         self._visible = True
@@ -368,7 +424,22 @@ class Window:
         return bool(toggle_maximize(self._handle))
 
     def set_fullscreen(self, fullscreen: bool = True) -> bool:
-        return bool(_native.set_fullscreen(self._handle, fullscreen))
+        applied = bool(_native.set_fullscreen(self._handle, fullscreen))
+        if applied:
+            self.options.fullscreen = fullscreen
+        return applied
+
+    def set_fullscreenable(self, fullscreenable: bool = True) -> bool:
+        set_fullscreenable = getattr(_native, "set_fullscreenable", None)
+        self.options.fullscreenable = fullscreenable
+        if not fullscreenable:
+            self.set_fullscreen(False)
+            self.dispatch_eval(BLOCK_FULLSCREEN_KEYS_JS)
+        else:
+            self.dispatch_eval("window.__appverse_fullscreenable = true;")
+        if set_fullscreenable is None:
+            return fullscreenable
+        return bool(set_fullscreenable(self._handle, fullscreenable))
 
     def start_drag(self) -> bool:
         start_drag = getattr(_native, "start_drag", None)

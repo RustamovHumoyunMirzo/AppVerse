@@ -14,6 +14,7 @@ def main() -> None:
         width=960,
         height=640,
         devtools=False,
+        debug=False,
     )
 
     window.load_html(r"examples\html\index.html")

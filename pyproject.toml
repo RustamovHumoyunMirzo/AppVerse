@@ -9,8 +9,8 @@ description = "Build native webview applications for Python."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-authors = [{ name = "AppVerse contributors" }]
-keywords = ["desktop", "webview", "gui", "electron", "native", "html"]
+authors = [{ name = "RustamovHumoyunMirzo" }]
+keywords = ["desktop", "webview", "gui", "native", "html"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Environment :: MacOS X",
@@ -31,6 +31,12 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: User Interfaces",
 ]
+
+[project.urls]
+Repository = "https://github.com/RustamovHumoyunMirzo/AppVerse"
+Documentation = "https://github.com/RustamovHumoyunMirzo/AppVerse/tree/main/docs"
+Issues = "https://github.com/RustamovHumoyunMirzo/AppVerse/issues"
+Changelog = "https://github.com/RustamovHumoyunMirzo/AppVerse/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 icons = ["Pillow>=9.0"]

@@ -20,6 +20,7 @@ Creates a native webview window. Accepted options mirror `WindowOptions`:
 - `size_hint`
 - `debug`
 - `devtools`
+- `hardware_acceleration`
 - `html`
 - `url`
 - `frameless`
@@ -46,6 +47,7 @@ appverse.WindowOptions(
     size_hint=appverse.HINT_NONE,
     debug=False,
     devtools=False,
+    hardware_acceleration=True,
     html=None,
     url=None,
     frameless=False,
@@ -237,6 +239,26 @@ it.
 
 Returns whether AppVerse currently considers native webview developer tooling
 enabled.
+
+### `set_hardware_acceleration_enabled(enabled: bool = True) -> bool`
+
+Enables or disables AppVerse's hardware-acceleration preference for the native
+webview backend. Prefer setting `hardware_acceleration=True` when creating the
+window, because GPU/process flags are creation-time settings on some engines.
+
+Platform behavior:
+
+- Windows: WebView2 uses GPU/WebGL acceleration by default. AppVerse sets safe
+  WebView2 browser-argument hints before creation when no user-provided WebView2
+  arguments already exist.
+- macOS: WKWebView manages GPU/WebGL acceleration through WebKit/AppKit and is
+  treated as enabled by default.
+- Linux: AppVerse applies WebKitGTK settings for WebGL, accelerated 2D canvas,
+  Web Audio, and Media Source where those properties are available.
+
+### `is_hardware_acceleration_enabled() -> bool`
+
+Returns AppVerse's current hardware-acceleration preference.
 
 ### `set_shadow(style: str | bool = True) -> bool`
 

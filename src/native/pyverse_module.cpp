@@ -68,6 +68,7 @@ struct WindowHandle {
   std::unordered_map<std::string, std::unique_ptr<BindingContext>> bindings;
   bool fullscreenable = true;
   bool devtools_enabled = false;
+  bool hardware_acceleration_enabled = true;
   bool shadow_enabled = true;
   std::string shadow_style = "system";
 #if defined(_WIN32)
@@ -488,6 +489,73 @@ bool apply_devtools_enabled(WindowHandle *handle, bool enabled) {
 #endif
 }
 
+bool set_gobject_bool_property(void *object, const char *name, bool enabled) {
+#if defined(__linux__)
+  if (!object || !name) {
+    return false;
+  }
+  auto *gobject = G_OBJECT(object);
+  GParamSpec *property = g_object_class_find_property(G_OBJECT_GET_CLASS(gobject), name);
+  if (!property) {
+    return false;
+  }
+  g_object_set(gobject, name, enabled ? TRUE : FALSE, nullptr);
+  return true;
+#else
+  (void)object;
+  (void)name;
+  (void)enabled;
+  return false;
+#endif
+}
+
+#if defined(_WIN32)
+bool configure_webview2_gpu_hint(bool enabled) {
+  DWORD existing_size =
+      GetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", nullptr, 0);
+  if (existing_size > 0) {
+    return true;
+  }
+
+  const wchar_t *args = enabled
+                            ? L"--enable-gpu-rasterization --enable-zero-copy "
+                              L"--ignore-gpu-blocklist"
+                            : L"--disable-gpu --disable-software-rasterizer";
+  return SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args) != FALSE;
+}
+#endif
+
+bool apply_hardware_acceleration_enabled(WindowHandle *handle, bool enabled) {
+  if (!handle || !handle->window) {
+    return false;
+  }
+  handle->hardware_acceleration_enabled = enabled;
+
+#if defined(_WIN32)
+  return enabled;
+#elif defined(__APPLE__)
+  return enabled;
+#elif defined(__linux__)
+  auto result = handle->window->browser_controller();
+  result.ensure_ok();
+  auto *webview = static_cast<WebKitWebView *>(result.value());
+  if (!WEBKIT_IS_WEB_VIEW(webview)) {
+    return false;
+  }
+
+  bool applied = false;
+  WebKitSettings *settings = webkit_web_view_get_settings(webview);
+  applied = set_gobject_bool_property(settings, "enable-webgl", enabled) || applied;
+  applied = set_gobject_bool_property(settings, "enable-accelerated-2d-canvas", enabled) ||
+            applied;
+  applied = set_gobject_bool_property(settings, "enable-webaudio", enabled) || applied;
+  applied = set_gobject_bool_property(settings, "enable-mediasource", enabled) || applied;
+  return applied;
+#else
+  return false;
+#endif
+}
+
 void binding_callback(const std::string &id, const std::string &request, void *arg) {
   auto *context = static_cast<BindingContext *>(arg);
   if (!context || !context->handle || !context->handle->window || !context->callable) {
@@ -533,19 +601,24 @@ void binding_callback(const std::string &id, const std::string &request, void *a
 PyObject *native_create_window(PyObject *, PyObject *args, PyObject *kwargs) {
   int debug = 0;
   int visible = 1;
-  static const char *keywords[] = {"debug", "visible", nullptr};
+  int hardware_acceleration = 1;
+  static const char *keywords[] = {"debug", "visible", "hardware_acceleration", nullptr};
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|pp", const_cast<char **>(keywords),
-                                   &debug, &visible)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ppp", const_cast<char **>(keywords),
+                                   &debug, &visible, &hardware_acceleration)) {
     return nullptr;
   }
 
   try {
+#if defined(_WIN32)
+    configure_webview2_gpu_hint(hardware_acceleration != 0);
+#endif
     auto window = std::make_unique<webview::webview>(debug != 0, nullptr);
     window->set_html(kPreloadHtml);
     auto handle = std::make_unique<WindowHandle>();
     handle->window = std::move(window);
     apply_devtools_enabled(handle.get(), debug != 0);
+    apply_hardware_acceleration_enabled(handle.get(), hardware_acceleration != 0);
     if (!visible) {
       apply_visibility(handle.get(), false);
     }
@@ -607,6 +680,46 @@ PyObject *native_is_devtools_enabled(PyObject *, PyObject *args) {
   }
 
   if (handle->devtools_enabled) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject *native_set_hardware_acceleration_enabled(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  int enabled = 1;
+  if (!PyArg_ParseTuple(args, "Op", &capsule, &enabled)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    if (apply_hardware_acceleration_enabled(handle, enabled != 0)) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_is_hardware_acceleration_enabled(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  if (handle->hardware_acceleration_enabled) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -2380,6 +2493,12 @@ PyMethodDef methods[] = {
      METH_VARARGS, "Toggle native webview developer tools and debug accelerators."},
     {"is_devtools_enabled", reinterpret_cast<PyCFunction>(native_is_devtools_enabled),
      METH_VARARGS, "Return whether native webview developer tools are enabled."},
+    {"set_hardware_acceleration_enabled",
+     reinterpret_cast<PyCFunction>(native_set_hardware_acceleration_enabled),
+     METH_VARARGS, "Toggle native webview hardware acceleration settings."},
+    {"is_hardware_acceleration_enabled",
+     reinterpret_cast<PyCFunction>(native_is_hardware_acceleration_enabled),
+     METH_VARARGS, "Return whether hardware acceleration is enabled."},
     {"set_title", reinterpret_cast<PyCFunction>(native_set_title), METH_VARARGS,
      "Set the native window title."},
     {"set_size", reinterpret_cast<PyCFunction>(native_set_size), METH_VARARGS,

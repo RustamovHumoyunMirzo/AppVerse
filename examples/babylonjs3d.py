@@ -1,3 +1,6 @@
+# origin repo: https://github.com/BabylonJS/Babylon.js
+# Apache-2.0 license
+
 from pathlib import Path
 import sys
 
@@ -11,14 +14,15 @@ import appverse
 
 def main() -> None:
     window = appverse.create_window(
+        title="3D test",
         width=960,
         height=640,
-        devtools=False,
-        debug=False,
+        devtools=True,
+        debug=True,
+        url="https://playground.babylonjs.com/?#YX6IB8#758",
     )
 
     window.set_hardware_acceleration_enabled(True)
-    window.load_html(r"examples\html\index.html")
     window.run()
 
 

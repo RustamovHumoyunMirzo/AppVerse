@@ -175,6 +175,7 @@ class WindowOptions:
     size_hint: int = HINT_NONE
     debug: bool = False
     devtools: bool = False
+    hardware_acceleration: bool = True
     html: str | None = None
     url: str | None = None
     frameless: bool = False
@@ -208,6 +209,7 @@ class Window:
         size_hint: int = HINT_NONE,
         debug: bool = False,
         devtools: bool = False,
+        hardware_acceleration: bool = True,
         html: str | None = None,
         url: str | None = None,
         frameless: bool = False,
@@ -233,6 +235,7 @@ class Window:
                 size_hint=size_hint,
                 debug=debug,
                 devtools=devtools,
+                hardware_acceleration=hardware_acceleration,
                 html=html,
                 url=url,
                 frameless=frameless,
@@ -250,6 +253,7 @@ class Window:
         self._handle = _native.create_window(
             debug=options.debug or options.devtools,
             visible=native_visible,
+            hardware_acceleration=options.hardware_acceleration,
         )
         self._closed = False
         self._started = False
@@ -372,6 +376,23 @@ class Window:
         if is_devtools_enabled is None:
             return self.options.debug or self.options.devtools
         return bool(is_devtools_enabled(self._handle))
+
+    def set_hardware_acceleration_enabled(self, enabled: bool = True) -> bool:
+        set_hardware_acceleration_enabled = getattr(
+            _native, "set_hardware_acceleration_enabled", None
+        )
+        self.options.hardware_acceleration = enabled
+        if set_hardware_acceleration_enabled is None:
+            return False
+        return bool(set_hardware_acceleration_enabled(self._handle, enabled))
+
+    def is_hardware_acceleration_enabled(self) -> bool:
+        is_hardware_acceleration_enabled = getattr(
+            _native, "is_hardware_acceleration_enabled", None
+        )
+        if is_hardware_acceleration_enabled is None:
+            return self.options.hardware_acceleration
+        return bool(is_hardware_acceleration_enabled(self._handle))
 
     def set_shadow(self, style: str | bool = True) -> bool:
         set_shadow = getattr(_native, "set_shadow", None)

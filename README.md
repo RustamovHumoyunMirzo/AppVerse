@@ -22,6 +22,7 @@ window = appverse.create_window(
     width=960,
     height=640,
     debug=True,
+    hardware_acceleration=True,
     show_when_ready=True,
     html="<h1>Hello from Python</h1>",
 )

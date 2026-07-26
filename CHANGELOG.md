@@ -22,6 +22,8 @@ The project follows semantic versioning.
   integer pointer.
 - Added native devtools toggling with WebView2 accelerator-key blocking when
   devtools are disabled.
+- Added hardware-acceleration preferences for GPU/WebGL-oriented webview
+  performance tuning across supported backends.
 
 ### Changed
 

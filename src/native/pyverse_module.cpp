@@ -12,6 +12,7 @@
 #include <shellapi.h>
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <cstdint>
 #include <objc/message.h>
 #include <objc/objc.h>
 #include <objc/runtime.h>
@@ -32,6 +33,11 @@ struct BindingContext;
 struct WindowHandle {
   std::unique_ptr<webview::webview> window;
   std::unordered_map<std::string, std::unique_ptr<BindingContext>> bindings;
+#if defined(_WIN32)
+  bool fullscreen = false;
+  WINDOWPLACEMENT previous_placement{};
+  LONG_PTR previous_style = 0;
+#endif
 };
 
 struct BindingContext {
@@ -69,6 +75,47 @@ void raise_runtime_error(const std::exception &e) {
 PyObject *none_on_success() {
   Py_RETURN_NONE;
 }
+
+#if defined(__APPLE__)
+struct CocoaPoint {
+  double x;
+  double y;
+};
+
+id cocoa_send_id(id receiver, const char *selector) {
+  using Fn = id (*)(id, SEL);
+  return reinterpret_cast<Fn>(objc_msgSend)(receiver, sel_registerName(selector));
+}
+
+id cocoa_class(const char *name) {
+  return reinterpret_cast<id>(objc_getClass(name));
+}
+
+id cocoa_string(const char *utf8) {
+  id ns_string = cocoa_class("NSString");
+  id allocated = cocoa_send_id(ns_string, "alloc");
+  using Fn = id (*)(id, SEL, const char *);
+  return reinterpret_cast<Fn>(objc_msgSend)(allocated, sel_registerName("initWithUTF8String:"), utf8);
+}
+
+void cocoa_release(id object) {
+  if (!object) {
+    return;
+  }
+  using Fn = void (*)(id, SEL);
+  reinterpret_cast<Fn>(objc_msgSend)(object, sel_registerName("release"));
+}
+
+bool cocoa_bool(id receiver, const char *selector) {
+  using Fn = bool (*)(id, SEL);
+  return reinterpret_cast<Fn>(objc_msgSend)(receiver, sel_registerName(selector));
+}
+
+unsigned long long cocoa_unsigned_long_long(id receiver, const char *selector) {
+  using Fn = unsigned long long (*)(id, SEL);
+  return reinterpret_cast<Fn>(objc_msgSend)(receiver, sel_registerName(selector));
+}
+#endif
 
 bool apply_visibility(WindowHandle *handle, bool visible) {
 #if defined(_WIN32)
@@ -157,7 +204,8 @@ PyObject *native_create_window(PyObject *, PyObject *args, PyObject *kwargs) {
   try {
     auto window = std::make_unique<webview::webview>(debug != 0, nullptr);
     window->set_html(kPreloadHtml);
-    auto handle = std::make_unique<WindowHandle>(WindowHandle{std::move(window), {}});
+    auto handle = std::make_unique<WindowHandle>();
+    handle->window = std::move(window);
     if (!visible) {
       apply_visibility(handle.get(), false);
     }
@@ -496,6 +544,55 @@ PyObject *native_set_icon(PyObject *, PyObject *args) {
     raise_runtime_error(e);
     return nullptr;
   }
+#elif defined(__APPLE__)
+  try {
+    id path_string = cocoa_string(path);
+    if (!path_string) {
+      Py_RETURN_FALSE;
+    }
+
+    id image_class = cocoa_class("NSImage");
+    id image = cocoa_send_id(image_class, "alloc");
+    using InitFn = id (*)(id, SEL, id);
+    image = reinterpret_cast<InitFn>(objc_msgSend)(
+        image, sel_registerName("initWithContentsOfFile:"), path_string);
+    cocoa_release(path_string);
+    if (!image) {
+      Py_RETURN_FALSE;
+    }
+
+    id app = cocoa_send_id(cocoa_class("NSApplication"), "sharedApplication");
+    using SetImageFn = void (*)(id, SEL, id);
+    reinterpret_cast<SetImageFn>(objc_msgSend)(
+        app, sel_registerName("setApplicationIconImage:"), image);
+    cocoa_release(image);
+    Py_RETURN_TRUE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+#elif defined(__linux__) && GTK_MAJOR_VERSION < 4
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (!GTK_IS_WINDOW(window)) {
+      Py_RETURN_FALSE;
+    }
+
+    GError *error = nullptr;
+    gboolean ok = gtk_window_set_icon_from_file(GTK_WINDOW(window), path, &error);
+    if (error) {
+      g_error_free(error);
+    }
+    if (ok) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
 #else
   Py_RETURN_FALSE;
 #endif
@@ -520,7 +617,8 @@ PyObject *native_set_frameless(PyObject *, PyObject *args) {
     auto *hwnd = static_cast<HWND>(result.value());
     LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
     if (frameless) {
-      style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
+      style &= ~(WS_CAPTION | WS_THICKFRAME);
+      style |= (WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
     } else {
       style |= (WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
     }
@@ -528,6 +626,43 @@ PyObject *native_set_frameless(PyObject *, PyObject *args) {
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     Py_RETURN_TRUE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+#elif defined(__APPLE__)
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+    auto window = static_cast<id>(result.value());
+    constexpr unsigned long long titled = 1ULL << 0;
+    constexpr unsigned long long closable = 1ULL << 1;
+    constexpr unsigned long long miniaturizable = 1ULL << 2;
+    constexpr unsigned long long resizable = 1ULL << 3;
+    auto style = cocoa_unsigned_long_long(window, "styleMask");
+    if (frameless) {
+      style &= ~titled;
+      style |= (closable | miniaturizable | resizable);
+    } else {
+      style |= (titled | closable | miniaturizable | resizable);
+    }
+    using Fn = void (*)(id, SEL, unsigned long long);
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("setStyleMask:"), style);
+    Py_RETURN_TRUE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+#elif defined(__linux__)
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+      gtk_window_set_decorated(GTK_WINDOW(window), frameless == 0);
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
   } catch (const std::exception &e) {
     raise_runtime_error(e);
     return nullptr;
@@ -554,6 +689,433 @@ PyObject *native_set_visible(PyObject *, PyObject *args) {
       Py_RETURN_TRUE;
     }
     Py_RETURN_FALSE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_set_position(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  int x = 0;
+  int y = 0;
+  if (!PyArg_ParseTuple(args, "Oii", &capsule, &x, &y)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    CocoaPoint point{static_cast<double>(x), static_cast<double>(y)};
+    using Fn = void (*)(id, SEL, CocoaPoint);
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("setFrameOrigin:"), point);
+    Py_RETURN_TRUE;
+#elif defined(__linux__) && GTK_MAJOR_VERSION < 4
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+      gtk_window_move(GTK_WINDOW(window), x, y);
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_minimize(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    ShowWindow(static_cast<HWND>(result.value()), SW_MINIMIZE);
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    using Fn = void (*)(id, SEL, id);
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("performMiniaturize:"), nil);
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+#if GTK_MAJOR_VERSION >= 4
+      gtk_window_minimize(GTK_WINDOW(window));
+#else
+      gtk_window_iconify(GTK_WINDOW(window));
+#endif
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_maximize(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    ShowWindow(static_cast<HWND>(result.value()), SW_MAXIMIZE);
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    using Fn = void (*)(id, SEL, id);
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("zoom:"), nil);
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+      gtk_window_maximize(GTK_WINDOW(window));
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_restore(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    if (handle->fullscreen) {
+      SetWindowLongPtrW(hwnd, GWL_STYLE, handle->previous_style);
+      SetWindowPlacement(hwnd, &handle->previous_placement);
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                       SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+      handle->fullscreen = false;
+    } else {
+      ShowWindow(hwnd, SW_RESTORE);
+    }
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    using Fn = void (*)(id, SEL, id);
+    if (cocoa_bool(window, "isMiniaturized")) {
+      reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("deminiaturize:"), nil);
+    }
+    if (cocoa_bool(window, "isZoomed")) {
+      reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("zoom:"), nil);
+    }
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+      gtk_window_unmaximize(GTK_WINDOW(window));
+      gtk_window_present(GTK_WINDOW(window));
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_toggle_maximize(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    if (handle->fullscreen || IsZoomed(hwnd)) {
+      if (handle->fullscreen) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, handle->previous_style);
+        SetWindowPlacement(hwnd, &handle->previous_placement);
+        SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        handle->fullscreen = false;
+      } else {
+        ShowWindow(hwnd, SW_RESTORE);
+      }
+    } else {
+      ShowWindow(hwnd, SW_MAXIMIZE);
+    }
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    using Fn = void (*)(id, SEL, id);
+    reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("zoom:"), nil);
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+#if GTK_MAJOR_VERSION >= 4
+      if (gtk_window_is_maximized(GTK_WINDOW(window))) {
+        gtk_window_unmaximize(GTK_WINDOW(window));
+      } else {
+        gtk_window_maximize(GTK_WINDOW(window));
+      }
+#else
+      auto *gdk_window = gtk_widget_get_window(window);
+      bool maximized = false;
+      if (gdk_window) {
+        maximized = (gdk_window_get_state(gdk_window) & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+      }
+      if (maximized) {
+        gtk_window_unmaximize(GTK_WINDOW(window));
+      } else {
+        gtk_window_maximize(GTK_WINDOW(window));
+      }
+#endif
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_set_fullscreen(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  int fullscreen = 0;
+  if (!PyArg_ParseTuple(args, "Op", &capsule, &fullscreen)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    if (fullscreen && !handle->fullscreen) {
+      handle->previous_style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+      handle->previous_placement.length = sizeof(WINDOWPLACEMENT);
+      GetWindowPlacement(hwnd, &handle->previous_placement);
+
+      MONITORINFO monitor_info{};
+      monitor_info.cbSize = sizeof(MONITORINFO);
+      if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                           &monitor_info)) {
+        Py_RETURN_FALSE;
+      }
+
+      SetWindowLongPtrW(hwnd, GWL_STYLE,
+                        handle->previous_style & ~(WS_CAPTION | WS_THICKFRAME));
+      SetWindowPos(hwnd, HWND_TOP,
+                   monitor_info.rcMonitor.left,
+                   monitor_info.rcMonitor.top,
+                   monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
+                   monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
+                   SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+      handle->fullscreen = true;
+    } else if (!fullscreen && handle->fullscreen) {
+      SetWindowLongPtrW(hwnd, GWL_STYLE, handle->previous_style);
+      SetWindowPlacement(hwnd, &handle->previous_placement);
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                       SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+      handle->fullscreen = false;
+    }
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    auto mask = cocoa_unsigned_long_long(window, "styleMask");
+    bool is_fullscreen = (mask & (1ULL << 14)) != 0;
+    if (is_fullscreen != static_cast<bool>(fullscreen)) {
+      using Fn = void (*)(id, SEL, id);
+      reinterpret_cast<Fn>(objc_msgSend)(window, sel_registerName("toggleFullScreen:"), nil);
+    }
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+      if (fullscreen) {
+        gtk_window_fullscreen(GTK_WINDOW(window));
+      } else {
+        gtk_window_unfullscreen(GTK_WINDOW(window));
+      }
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_start_drag(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    ReleaseCapture();
+    SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    Class ns_application = objc_getClass("NSApplication");
+    using SharedAppFn = id (*)(id, SEL);
+    auto app = reinterpret_cast<SharedAppFn>(objc_msgSend)(
+        reinterpret_cast<id>(ns_application), sel_registerName("sharedApplication"));
+    using EventFn = id (*)(id, SEL);
+    auto event = reinterpret_cast<EventFn>(objc_msgSend)(app, sel_registerName("currentEvent"));
+    if (!event) {
+      Py_RETURN_FALSE;
+    }
+    using DragFn = void (*)(id, SEL, id);
+    reinterpret_cast<DragFn>(objc_msgSend)(window, sel_registerName("performWindowDragWithEvent:"), event);
+    Py_RETURN_TRUE;
+#elif defined(__linux__) && GTK_MAJOR_VERSION < 4
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (GTK_IS_WINDOW(window)) {
+      gtk_window_begin_move_drag(GTK_WINDOW(window), 1, 0, 0, gtk_get_current_event_time());
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_show_window_menu(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  int x = 0;
+  int y = 0;
+  if (!PyArg_ParseTuple(args, "Oii", &capsule, &x, &y)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    HMENU menu = GetSystemMenu(hwnd, FALSE);
+    if (!menu) {
+      Py_RETURN_FALSE;
+    }
+
+    const bool minimized = IsIconic(hwnd) != FALSE;
+    const bool maximized = IsZoomed(hwnd) != FALSE;
+    EnableMenuItem(menu, SC_RESTORE,
+                   MF_BYCOMMAND | ((minimized || maximized) ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(menu, SC_MAXIMIZE,
+                   MF_BYCOMMAND | (maximized ? MF_GRAYED : MF_ENABLED));
+    EnableMenuItem(menu, SC_MINIMIZE,
+                   MF_BYCOMMAND | (minimized ? MF_GRAYED : MF_ENABLED));
+    DrawMenuBar(hwnd);
+
+    POINT cursor{};
+    if (!GetCursorPos(&cursor)) {
+      cursor.x = x;
+      cursor.y = y;
+    }
+
+    SetForegroundWindow(hwnd);
+    UINT flags = TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN;
+    int command =
+        TrackPopupMenu(menu, flags, cursor.x, cursor.y, 0, hwnd, nullptr);
+    if (command != 0) {
+      PostMessageW(hwnd, WM_SYSCOMMAND, static_cast<WPARAM>(command), 0);
+    }
+    PostMessageW(hwnd, WM_NULL, 0, 0);
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
   } catch (const std::exception &e) {
     raise_runtime_error(e);
     return nullptr;
@@ -593,6 +1155,22 @@ PyMethodDef methods[] = {
      "Toggle native window frame decorations."},
     {"set_visible", reinterpret_cast<PyCFunction>(native_set_visible), METH_VARARGS,
      "Toggle native window visibility."},
+    {"set_position", reinterpret_cast<PyCFunction>(native_set_position), METH_VARARGS,
+     "Set native window position."},
+    {"minimize", reinterpret_cast<PyCFunction>(native_minimize), METH_VARARGS,
+     "Minimize the native window."},
+    {"maximize", reinterpret_cast<PyCFunction>(native_maximize), METH_VARARGS,
+     "Maximize the native window."},
+    {"restore", reinterpret_cast<PyCFunction>(native_restore), METH_VARARGS,
+     "Restore the native window."},
+    {"toggle_maximize", reinterpret_cast<PyCFunction>(native_toggle_maximize), METH_VARARGS,
+     "Toggle native window maximized state."},
+    {"set_fullscreen", reinterpret_cast<PyCFunction>(native_set_fullscreen), METH_VARARGS,
+     "Toggle native fullscreen mode."},
+    {"start_drag", reinterpret_cast<PyCFunction>(native_start_drag), METH_VARARGS,
+     "Start a native window drag operation."},
+    {"show_window_menu", reinterpret_cast<PyCFunction>(native_show_window_menu), METH_VARARGS,
+     "Show the native window control context menu."},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef module = {

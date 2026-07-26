@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import os
+import re
 from typing import Any, Callable, DefaultDict, Final
 
 
@@ -62,6 +63,51 @@ APPVERSE_BRIDGE_JS = r"""
     },
     emit,
   };
+
+  const getRegion = (element) => {
+    for (let node = element; node && node !== document; node = node.parentElement) {
+      const style = window.getComputedStyle(node);
+      const region = style.getPropertyValue("-webkit-app-region") || style.getPropertyValue("app-region");
+      if (region === "no-drag") return "no-drag";
+      if (region === "drag") return "drag";
+    }
+    return "none";
+  };
+
+  window.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 && event.button !== 2) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const tag = target.tagName.toLowerCase();
+    if (["button", "input", "select", "textarea", "a"].includes(tag)) return;
+    if (getRegion(target) !== "drag") return;
+    event.preventDefault();
+    if (event.button === 2) {
+      window.appverse.call("__appverse_show_window_menu", event.screenX, event.screenY).catch(() => {});
+      return;
+    }
+    if (event.detail > 1) return;
+    window.appverse.call("__appverse_start_drag").catch(() => {});
+  }, true);
+
+  window.addEventListener("dblclick", (event) => {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const tag = target.tagName.toLowerCase();
+    if (["button", "input", "select", "textarea", "a"].includes(tag)) return;
+    if (getRegion(target) !== "drag") return;
+    event.preventDefault();
+    window.appverse.call("__appverse_toggle_maximize").catch(() => {});
+  }, true);
+
+  window.addEventListener("contextmenu", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (getRegion(target) !== "drag") return;
+    event.preventDefault();
+    window.appverse.call("__appverse_show_window_menu", event.screenX, event.screenY).catch(() => {});
+  }, true);
 })();
 """
 
@@ -93,14 +139,22 @@ READY_REVEAL_JS = r"""
 
 @dataclass
 class WindowOptions:
-    title: str = "AppVerse"
+    title: str | None = None
     width: int = 960
     height: int = 640
+    x: int | None = None
+    y: int | None = None
+    min_width: int | None = None
+    min_height: int | None = None
+    max_width: int | None = None
+    max_height: int | None = None
     size_hint: int = HINT_NONE
     debug: bool = False
+    devtools: bool = False
     html: str | None = None
     url: str | None = None
     frameless: bool = False
+    fullscreen: bool = False
     icon: str | os.PathLike[str] | None = None
     visible: bool = True
     show_when_ready: bool = False
@@ -117,14 +171,22 @@ class Window:
     def __init__(
         self,
         *,
-        title: str = "AppVerse",
+        title: str | None = None,
         width: int = 960,
         height: int = 640,
+        x: int | None = None,
+        y: int | None = None,
+        min_width: int | None = None,
+        min_height: int | None = None,
+        max_width: int | None = None,
+        max_height: int | None = None,
         size_hint: int = HINT_NONE,
         debug: bool = False,
+        devtools: bool = False,
         html: str | None = None,
         url: str | None = None,
         frameless: bool = False,
+        fullscreen: bool = False,
         icon: str | os.PathLike[str] | None = None,
         visible: bool = True,
         show_when_ready: bool = False,
@@ -136,11 +198,19 @@ class Window:
                 title=title,
                 width=width,
                 height=height,
+                x=x,
+                y=y,
+                min_width=min_width,
+                min_height=min_height,
+                max_width=max_width,
+                max_height=max_height,
                 size_hint=size_hint,
                 debug=debug,
+                devtools=devtools,
                 html=html,
                 url=url,
                 frameless=frameless,
+                fullscreen=fullscreen,
                 icon=icon,
                 visible=visible,
                 show_when_ready=show_when_ready,
@@ -148,8 +218,12 @@ class Window:
             )
 
         self.options = options
+        self._title_explicit = options.title is not None
         native_visible = options.visible and not options.show_when_ready
-        self._handle = _native.create_window(debug=options.debug, visible=native_visible)
+        self._handle = _native.create_window(
+            debug=options.debug or options.devtools,
+            visible=native_visible,
+        )
         self._closed = False
         self._started = False
         self._visible = native_visible
@@ -160,14 +234,26 @@ class Window:
         if options.show_when_ready:
             self.init(READY_REVEAL_JS)
         self.bind("__appverse_message", self._receive_message)
-        self.set_title(options.title)
+        self.bind("__appverse_start_drag", self._start_drag)
+        self.bind("__appverse_show_window_menu", self._show_window_menu)
+        self.bind("__appverse_toggle_maximize", self._toggle_maximize)
+        if options.title is not None:
+            self.set_title(options.title)
         self.set_size(options.width, options.height, options.size_hint)
+        if options.x is not None and options.y is not None:
+            self.set_position(options.x, options.y)
+        if options.min_width is not None and options.min_height is not None:
+            self.set_min_size(options.min_width, options.min_height)
+        if options.max_width is not None and options.max_height is not None:
+            self.set_max_size(options.max_width, options.max_height)
 
         for script in options.init_scripts:
             self.init(script)
 
         if options.frameless:
             self.set_frameless(True)
+        if options.fullscreen:
+            self.set_fullscreen(True)
         if options.icon is not None:
             self.set_icon(options.icon)
         if options.html is not None:
@@ -215,6 +301,18 @@ class Window:
     def set_size(self, width: int, height: int, hint: int = HINT_NONE) -> None:
         _native.set_size(self._handle, width, height, hint)
 
+    def set_min_size(self, width: int, height: int) -> None:
+        self.set_size(width, height, HINT_MIN)
+
+    def set_max_size(self, width: int, height: int) -> None:
+        self.set_size(width, height, HINT_MAX)
+
+    def set_fixed_size(self, width: int, height: int) -> None:
+        self.set_size(width, height, HINT_FIXED)
+
+    def set_position(self, x: int, y: int) -> bool:
+        return bool(_native.set_position(self._handle, x, y))
+
     def set_icon(self, icon: str | os.PathLike[str]) -> bool:
         icon_path = self._prepare_icon(icon)
         return bool(_native.set_icon(self._handle, str(icon_path)))
@@ -234,12 +332,54 @@ class Window:
         self.emit(HIDE, self, applied)
         return applied
 
+    def minimize(self) -> bool:
+        return bool(_native.minimize(self._handle))
+
+    def maximize(self) -> bool:
+        return bool(_native.maximize(self._handle))
+
+    def restore(self) -> bool:
+        return bool(_native.restore(self._handle))
+
+    def toggle_maximize(self) -> bool:
+        toggle_maximize = getattr(_native, "toggle_maximize", None)
+        if toggle_maximize is None:
+            return False
+        return bool(toggle_maximize(self._handle))
+
+    def set_fullscreen(self, fullscreen: bool = True) -> bool:
+        return bool(_native.set_fullscreen(self._handle, fullscreen))
+
+    def start_drag(self) -> bool:
+        start_drag = getattr(_native, "start_drag", None)
+        if start_drag is None:
+            return False
+        return bool(start_drag(self._handle))
+
+    def show_window_menu(self, x: int, y: int) -> bool:
+        show_window_menu = getattr(_native, "show_window_menu", None)
+        if show_window_menu is None:
+            return False
+        return bool(show_window_menu(self._handle, x, y))
+
+    def open_devtools(self) -> bool:
+        return self.options.debug or self.options.devtools
+
     def set_html(self, html: str) -> None:
+        if not self._title_explicit:
+            title = self._extract_title(html)
+            if title:
+                self.set_title(title)
         _native.set_html(self._handle, html)
 
     def load_html(self, path: str | os.PathLike[str], *, encoding: str = "utf-8") -> None:
         html_path = Path(path).expanduser().resolve()
-        self.set_html(html_path.read_text(encoding=encoding))
+        html = html_path.read_text(encoding=encoding)
+        if not self._title_explicit:
+            title = self._extract_title(html)
+            if title:
+                self.set_title(title)
+        self.navigate(html_path.as_uri())
 
     def navigate(self, url: str) -> None:
         _native.navigate(self._handle, url)
@@ -309,6 +449,15 @@ class Window:
             return
         self.emit(MESSAGE, event, detail)
 
+    def _start_drag(self) -> bool:
+        return self.start_drag()
+
+    def _show_window_menu(self, x: int, y: int) -> bool:
+        return self.show_window_menu(x, y)
+
+    def _toggle_maximize(self) -> bool:
+        return self.toggle_maximize()
+
     def _prepare_icon(self, icon: str | os.PathLike[str]) -> Path:
         icon_path = Path(icon).expanduser()
         if not icon_path.is_absolute():
@@ -333,6 +482,13 @@ class Window:
         with Image.open(icon_path) as image:
             image.save(ico_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
         return ico_path
+
+    def _extract_title(self, html: str) -> str | None:
+        match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return None
+        title = re.sub(r"\s+", " ", match.group(1)).strip()
+        return title or None
 
     def __enter__(self) -> "Window":
         return self

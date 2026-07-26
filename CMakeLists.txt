@@ -33,6 +33,14 @@ target_include_directories(pyverse_native PRIVATE
   "${Python3_INCLUDE_DIRS}"
 )
 
+if(APPLE)
+  target_link_libraries(pyverse_native PRIVATE "-framework Cocoa")
+endif()
+
+if(WIN32)
+  target_link_libraries(pyverse_native PRIVATE shell32)
+endif()
+
 set_target_properties(pyverse_native PROPERTIES
   PREFIX ""
   OUTPUT_NAME "_native"

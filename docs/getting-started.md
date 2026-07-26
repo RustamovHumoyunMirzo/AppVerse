@@ -55,6 +55,14 @@ window.load_html("ui/index.html")
 window.run()
 ```
 
+If you omit `title`, AppVerse inherits the document's `<title>`:
+
+```python
+window = appverse.create_window(show_when_ready=True)
+window.load_html("ui/index.html")
+window.run()
+```
+
 To keep a window hidden until you decide to show it:
 
 ```python
@@ -62,6 +70,23 @@ window = appverse.create_window(visible=False)
 window.load_html("ui/index.html")
 window.run()
 ```
+
+For frameless draggable regions, write CSS in your app:
+
+```css
+.titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+button,
+input,
+a {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+```
+
 
 ## Events and Bridge
 

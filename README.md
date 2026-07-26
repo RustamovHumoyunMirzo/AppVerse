@@ -60,6 +60,10 @@ window.run()
 Use `visible=False` for windows that should remain hidden until `show()` is
 called.
 
+`load_html()` navigates to the local file URL, so relative CSS, scripts, images,
+and links resolve from the HTML file's directory. If no title is set, AppVerse
+uses the document's `<title>`.
+
 ## Local Development
 
 On Windows, install Python 3.9+, CMake, Ninja, Git, and a C++ compiler, then run:

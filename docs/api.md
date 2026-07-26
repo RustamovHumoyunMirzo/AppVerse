@@ -11,11 +11,19 @@ Creates a native webview window. Accepted options mirror `WindowOptions`:
 - `title`
 - `width`
 - `height`
+- `x`
+- `y`
+- `min_width`
+- `min_height`
+- `max_width`
+- `max_height`
 - `size_hint`
 - `debug`
+- `devtools`
 - `html`
 - `url`
 - `frameless`
+- `fullscreen`
 - `icon`
 - `visible`
 - `show_when_ready`
@@ -25,14 +33,22 @@ Creates a native webview window. Accepted options mirror `WindowOptions`:
 
 ```python
 appverse.WindowOptions(
-    title="AppVerse",
+    title=None,
     width=960,
     height=640,
+    x=None,
+    y=None,
+    min_width=None,
+    min_height=None,
+    max_width=None,
+    max_height=None,
     size_hint=appverse.HINT_NONE,
     debug=False,
+    devtools=False,
     html=None,
     url=None,
     frameless=False,
+    fullscreen=False,
     icon=None,
     visible=True,
     show_when_ready=False,
@@ -41,6 +57,8 @@ appverse.WindowOptions(
 ```
 
 Use `WindowOptions` when a window configuration is shared across your app.
+When `title` is `None`, AppVerse inherits the first `<title>` from HTML loaded
+with `set_html()` or `load_html()`.
 
 ## Events
 
@@ -117,17 +135,95 @@ Sets the window size. Size hints are:
 - `HINT_MAX`
 - `HINT_FIXED`
 
+### `set_min_size(width: int, height: int) -> None`
+
+Sets minimum resize bounds.
+
+### `set_max_size(width: int, height: int) -> None`
+
+Sets maximum resize bounds.
+
+### `set_fixed_size(width: int, height: int) -> None`
+
+Sets a fixed, non-resizable size.
+
+### `set_position(x: int, y: int) -> bool`
+
+Attempts to move the native window to screen coordinates.
+
 ### `set_icon(icon: str | PathLike) -> bool`
 
 Attempts to set the native window icon. Returns `True` when supported and
 applied. Relative paths are resolved from the current working directory. Windows
 uses `.ico` directly and can convert common image formats when Pillow is
-installed with `appverse[icons]`.
+installed with `appverse[icons]`. macOS applies the image as the application
+icon. GTK3 Linux builds apply the icon through GTK.
 
 ### `set_frameless(frameless: bool = True) -> bool`
 
 Attempts to toggle native frame decorations. Returns `True` when supported and
 applied. The current native implementation supports Windows.
+
+### `set_fullscreen(fullscreen: bool = True) -> bool`
+
+Toggles fullscreen/maximized presentation where supported.
+
+### `minimize() -> bool`
+
+Minimizes the native window.
+
+### `maximize() -> bool`
+
+Maximizes the native window.
+
+### `restore() -> bool`
+
+Restores a minimized, maximized, or fullscreen window where supported.
+
+### `toggle_maximize() -> bool`
+
+Toggles between maximized and restored states where supported.
+
+### `start_drag() -> bool`
+
+Starts a native window drag operation. AppVerse calls this automatically when
+the user presses an element styled with app-region drag CSS.
+
+### `show_window_menu(x: int, y: int) -> bool`
+
+Shows the native window controls context menu at screen coordinates. AppVerse
+calls this automatically when the user right-clicks an app-region drag area.
+Windows currently shows the OS system menu; unsupported platforms return
+`False`.
+
+### `open_devtools() -> bool`
+
+Returns whether developer tooling was requested. Enable it with `debug=True` or
+`devtools=True` when creating the window.
+
+## App Region CSS
+
+App regions are authored in HTML/CSS, like Electron. Use them with frameless
+windows. AppVerse detects these CSS properties and starts native window drag on
+left-click. Double-clicking a drag region toggles maximize/restore where
+supported. On Windows, right-clicking a drag region opens the native system
+window menu.
+
+```css
+.titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+button,
+input,
+a,
+.no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+```
+
 
 ### `set_html(html: str) -> None`
 
@@ -135,7 +231,9 @@ Renders an HTML document string.
 
 ### `load_html(path: str | PathLike, *, encoding: str = "utf-8") -> None`
 
-Reads a local HTML file and renders it with `set_html`.
+Loads a local HTML file through a `file://` URL so relative CSS, scripts, images,
+and links resolve from that file's directory. If `title` was not set explicitly,
+the first `<title>` in the file becomes the native window title.
 
 ### `navigate(url: str) -> None`
 

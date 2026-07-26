@@ -71,7 +71,6 @@ HTML = """
     <h1>AppVerse is alive.</h1>
     <p>
       This window is Python driving native WebView2 through a tiny C++ bridge.
-      Next up: Python-to-JavaScript bindings, packaging, and app lifecycle APIs.
     </p>
     <button id="ping">Call Python</button>
     <span id="status">Ready</span>

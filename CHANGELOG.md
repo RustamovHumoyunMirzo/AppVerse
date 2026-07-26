@@ -28,6 +28,19 @@ The project follows semantic versioning while the public API matures.
 - Added `visible` window option for hidden startup. `show_when_ready=True` now
   starts native-hidden, shows at `run()`, and reveals page content after document
   readiness.
+- Added position, min/max/fixed size helpers, fullscreen, minimize, maximize,
+  restore, and devtools option.
+- Documented Electron-style app regions as app-authored CSS.
+- Added native app-region drag support through CSS detection and `start_drag()`.
+- Added right-click native system menu support for Windows app-region drag
+  areas.
+- Added app-region double-click maximize/restore behavior through native
+  `toggle_maximize()`.
+- Expanded native window APIs across platforms: macOS app icon, frameless,
+  position, fullscreen, and restore behavior; GTK3 icon and frameless support;
+  explicit Win32 fullscreen state restore and system-menu state syncing.
+- `load_html()` now uses `file://` navigation so local relative links resolve,
+  and native titles inherit the document `<title>` when no title is set.
 - Improved icon path handling and added optional Pillow-based image-to-ICO
   conversion through `appverse[icons]`.
 - Native CPython wheel build configuration for Python 3.9+.

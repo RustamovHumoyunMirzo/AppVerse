@@ -36,6 +36,12 @@ BACKDROP_GLASS: Final[str] = "glass"
 READY_TO_SHOW: Final[str] = "ready_to_show"
 
 
+class Color:
+    TRANSPARENT: Final[str] = "#00000000"
+    WHITE: Final[str] = "#ffffff"
+    BLACK: Final[str] = "#000000"
+
+
 APPVERSE_BRIDGE_JS = r"""
 (() => {
   if (window.appverse) return;
@@ -328,6 +334,12 @@ class Window:
     def set_backdrop_effect(self, effect: str) -> bool:
         return bool(_native.set_backdrop_effect(self._handle, effect))
 
+    def set_background_color(self, color: str) -> bool:
+        return bool(_native.set_background_color(self._handle, color))
+
+    def set_border_color(self, color: str) -> bool:
+        return bool(_native.set_border_color(self._handle, color))
+
     def show(self) -> bool:
         applied = bool(_native.set_visible(self._handle, True))
         self._visible = True
@@ -512,6 +524,7 @@ def create_window(**kwargs: Any) -> Window:
 __all__ = [
     "APPVERSE_BRIDGE_JS",
     "CLOSE",
+    "Color",
     "DESTROY",
     "ERROR",
     "HINT_FIXED",

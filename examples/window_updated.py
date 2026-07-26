@@ -15,9 +15,10 @@ def main() -> None:
         height=640,
         debug=True,
         devtools=False,
-        frameless=False,
     )
 
+    window.set_background_color("#151515")
+    window.set_border_color("#cccccc")
     window.load_html(r"examples\html\index.html")
     window.run()
 

@@ -3,6 +3,8 @@
 
 #include "webview/webview.h"
 
+#include <cctype>
+#include <cstdio>
 #include <exception>
 #include <memory>
 #include <string>
@@ -24,6 +26,15 @@
 #if defined(_WIN32) && !defined(DWMWA_SYSTEMBACKDROP_TYPE)
 #define DWMWA_SYSTEMBACKDROP_TYPE 38
 #endif
+#if defined(_WIN32) && !defined(DWMWA_BORDER_COLOR)
+#define DWMWA_BORDER_COLOR 34
+#endif
+#if defined(_WIN32) && !defined(DWMWA_CAPTION_COLOR)
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#if defined(_WIN32) && !defined(DWMWA_TEXT_COLOR)
+#define DWMWA_TEXT_COLOR 36
+#endif
 
 namespace {
 
@@ -40,6 +51,13 @@ enum class BackdropEffect {
   Glass,
 };
 
+struct RgbaColor {
+  unsigned char red = 0;
+  unsigned char green = 0;
+  unsigned char blue = 0;
+  unsigned char alpha = 255;
+};
+
 struct BindingContext;
 
 struct WindowHandle {
@@ -47,9 +65,18 @@ struct WindowHandle {
   std::unordered_map<std::string, std::unique_ptr<BindingContext>> bindings;
 #if defined(_WIN32)
   bool fullscreen = false;
+  HBRUSH background_brush = nullptr;
   WINDOWPLACEMENT previous_placement{};
   LONG_PTR previous_style = 0;
 #endif
+
+  ~WindowHandle() {
+#if defined(_WIN32)
+    if (background_brush) {
+      DeleteObject(background_brush);
+    }
+#endif
+  }
 };
 
 struct BindingContext {
@@ -112,6 +139,179 @@ bool parse_backdrop_effect(const char *name, BackdropEffect *effect) {
   }
   if (value == "glass" || value == "tabbed") {
     *effect = BackdropEffect::Glass;
+    return true;
+  }
+  return false;
+}
+
+std::string normalized_text(const char *text) {
+  std::string value{text ? text : ""};
+  size_t start = 0;
+  while (start < value.size() &&
+         std::isspace(static_cast<unsigned char>(value[start])) != 0) {
+    ++start;
+  }
+  size_t end = value.size();
+  while (end > start &&
+         std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
+    --end;
+  }
+  value = value.substr(start, end - start);
+  for (auto &ch : value) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  return value;
+}
+
+int hex_value(char ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ch - '0';
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ch - 'a' + 10;
+  }
+  if (ch >= 'A' && ch <= 'F') {
+    return ch - 'A' + 10;
+  }
+  return -1;
+}
+
+bool parse_hex_byte(const std::string &value, size_t offset, unsigned char *out) {
+  if (!out || offset + 1 >= value.size()) {
+    return false;
+  }
+  int high = hex_value(value[offset]);
+  int low = hex_value(value[offset + 1]);
+  if (high < 0 || low < 0) {
+    return false;
+  }
+  *out = static_cast<unsigned char>((high << 4) | low);
+  return true;
+}
+
+bool parse_int_component(const std::string &value, size_t *offset, int *out) {
+  if (!offset || !out) {
+    return false;
+  }
+  while (*offset < value.size() &&
+         std::isspace(static_cast<unsigned char>(value[*offset])) != 0) {
+    ++(*offset);
+  }
+  size_t start = *offset;
+  while (*offset < value.size() &&
+         std::isdigit(static_cast<unsigned char>(value[*offset])) != 0) {
+    ++(*offset);
+  }
+  if (start == *offset) {
+    return false;
+  }
+  int number = std::stoi(value.substr(start, *offset - start));
+  if (number < 0 || number > 255) {
+    return false;
+  }
+  *out = number;
+  return true;
+}
+
+bool parse_alpha_component(const std::string &value, size_t *offset, unsigned char *out) {
+  if (!offset || !out) {
+    return false;
+  }
+  while (*offset < value.size() &&
+         std::isspace(static_cast<unsigned char>(value[*offset])) != 0) {
+    ++(*offset);
+  }
+  size_t start = *offset;
+  while (*offset < value.size() &&
+         (std::isdigit(static_cast<unsigned char>(value[*offset])) != 0 ||
+          value[*offset] == '.')) {
+    ++(*offset);
+  }
+  if (start == *offset) {
+    return false;
+  }
+  double alpha = std::stod(value.substr(start, *offset - start));
+  if (alpha >= 0.0 && alpha <= 1.0) {
+    *out = static_cast<unsigned char>(alpha * 255.0 + 0.5);
+    return true;
+  }
+  if (alpha >= 0.0 && alpha <= 255.0) {
+    *out = static_cast<unsigned char>(alpha + 0.5);
+    return true;
+  }
+  return false;
+}
+
+bool consume_comma(const std::string &value, size_t *offset) {
+  if (!offset) {
+    return false;
+  }
+  while (*offset < value.size() &&
+         std::isspace(static_cast<unsigned char>(value[*offset])) != 0) {
+    ++(*offset);
+  }
+  if (*offset >= value.size() || value[*offset] != ',') {
+    return false;
+  }
+  ++(*offset);
+  return true;
+}
+
+bool parse_background_color(const char *color_text, RgbaColor *color) {
+  if (!color) {
+    return false;
+  }
+  std::string value = normalized_text(color_text);
+  if (value == "transparent" || value == "none") {
+    *color = RgbaColor{0, 0, 0, 0};
+    return true;
+  }
+  if (value.rfind("#", 0) == 0) {
+    if (value.size() == 7) {
+      return parse_hex_byte(value, 1, &color->red) &&
+             parse_hex_byte(value, 3, &color->green) &&
+             parse_hex_byte(value, 5, &color->blue);
+    }
+    if (value.size() == 9) {
+      return parse_hex_byte(value, 1, &color->red) &&
+             parse_hex_byte(value, 3, &color->green) &&
+             parse_hex_byte(value, 5, &color->blue) &&
+             parse_hex_byte(value, 7, &color->alpha);
+    }
+    return false;
+  }
+  bool has_alpha = value.rfind("rgba(", 0) == 0;
+  bool has_rgb = value.rfind("rgb(", 0) == 0;
+  if (has_alpha || has_rgb) {
+    size_t offset = has_alpha ? 5 : 4;
+    int red = 0;
+    int green = 0;
+    int blue = 0;
+    unsigned char alpha = 255;
+    if (!parse_int_component(value, &offset, &red) ||
+        !consume_comma(value, &offset) ||
+        !parse_int_component(value, &offset, &green) ||
+        !consume_comma(value, &offset) ||
+        !parse_int_component(value, &offset, &blue)) {
+      return false;
+    }
+    if (has_alpha) {
+      if (!consume_comma(value, &offset) ||
+          !parse_alpha_component(value, &offset, &alpha)) {
+        return false;
+      }
+    }
+    while (offset < value.size() &&
+           std::isspace(static_cast<unsigned char>(value[offset])) != 0) {
+      ++offset;
+    }
+    if (offset >= value.size() || value[offset] != ')') {
+      return false;
+    }
+    *color = RgbaColor{static_cast<unsigned char>(red),
+                       static_cast<unsigned char>(green),
+                       static_cast<unsigned char>(blue),
+                       alpha};
     return true;
   }
   return false;
@@ -835,6 +1035,200 @@ PyObject *native_set_backdrop_effect(PyObject *, PyObject *args) {
   }
 }
 
+PyObject *native_set_background_color(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  const char *color_text = nullptr;
+  if (!PyArg_ParseTuple(args, "Os", &capsule, &color_text)) {
+    return nullptr;
+  }
+
+  RgbaColor color{};
+  try {
+    if (!parse_background_color(color_text, &color)) {
+      PyErr_SetString(PyExc_ValueError,
+                      "background color must be #RRGGBB, #RRGGBBAA, "
+                      "rgb(...), rgba(...), or transparent");
+      return nullptr;
+    }
+  } catch (const std::exception &) {
+    PyErr_SetString(PyExc_ValueError,
+                    "background color must be #RRGGBB, #RRGGBBAA, "
+                    "rgb(...), rgba(...), or transparent");
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    HBRUSH brush = CreateSolidBrush(RGB(color.red, color.green, color.blue));
+    if (!brush) {
+      Py_RETURN_FALSE;
+    }
+
+    HBRUSH previous = handle->background_brush;
+    handle->background_brush = brush;
+    SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, reinterpret_cast<LONG_PTR>(brush));
+    if (previous) {
+      DeleteObject(previous);
+    }
+
+    MARGINS margins{};
+    if (color.alpha < 255) {
+      margins = {-1, -1, -1, -1};
+    }
+    DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+    COLORREF caption_color = RGB(color.red, color.green, color.blue);
+    DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &caption_color,
+                          sizeof(caption_color));
+    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &caption_color,
+                          sizeof(caption_color));
+
+    int brightness = static_cast<int>(color.red) * 299 +
+                     static_cast<int>(color.green) * 587 +
+                     static_cast<int>(color.blue) * 114;
+    COLORREF text_color = brightness < 128000 ? RGB(255, 255, 255) : RGB(0, 0, 0);
+    DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text_color, sizeof(text_color));
+
+    InvalidateRect(hwnd, nullptr, TRUE);
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    using BoolFn = void (*)(id, SEL, bool);
+    reinterpret_cast<BoolFn>(objc_msgSend)(
+        window, sel_registerName("setOpaque:"), color.alpha == 255);
+
+    id color_class = cocoa_class("NSColor");
+    using ColorFn = id (*)(id, SEL, double, double, double, double);
+    id ns_color = reinterpret_cast<ColorFn>(objc_msgSend)(
+        color_class,
+        sel_registerName("colorWithCalibratedRed:green:blue:alpha:"),
+        static_cast<double>(color.red) / 255.0,
+        static_cast<double>(color.green) / 255.0,
+        static_cast<double>(color.blue) / 255.0,
+        static_cast<double>(color.alpha) / 255.0);
+    using SetColorFn = void (*)(id, SEL, id);
+    reinterpret_cast<SetColorFn>(objc_msgSend)(
+        window, sel_registerName("setBackgroundColor:"), ns_color);
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (!GTK_IS_WINDOW(window)) {
+      Py_RETURN_FALSE;
+    }
+    char css[160];
+    snprintf(css, sizeof(css),
+             "window, .background { background-color: rgba(%u, %u, %u, %.4f); }",
+             static_cast<unsigned int>(color.red),
+             static_cast<unsigned int>(color.green),
+             static_cast<unsigned int>(color.blue),
+             static_cast<double>(color.alpha) / 255.0);
+    GtkCssProvider *provider = gtk_css_provider_new();
+#if GTK_MAJOR_VERSION < 4
+    gtk_css_provider_load_from_data(provider, css, -1, nullptr);
+    GtkStyleContext *context = gtk_widget_get_style_context(window);
+    gtk_style_context_add_provider(
+        context, GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#else
+    gtk_css_provider_load_from_data(provider, css, -1);
+    gtk_style_context_add_provider_for_display(
+        gtk_widget_get_display(window), GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#endif
+    g_object_unref(provider);
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_set_border_color(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  const char *color_text = nullptr;
+  if (!PyArg_ParseTuple(args, "Os", &capsule, &color_text)) {
+    return nullptr;
+  }
+
+  RgbaColor color{};
+  try {
+    if (!parse_background_color(color_text, &color)) {
+      PyErr_SetString(PyExc_ValueError,
+                      "border color must be #RRGGBB, #RRGGBBAA, "
+                      "rgb(...), rgba(...), or transparent");
+      return nullptr;
+    }
+  } catch (const std::exception &) {
+    PyErr_SetString(PyExc_ValueError,
+                    "border color must be #RRGGBB, #RRGGBBAA, "
+                    "rgb(...), rgba(...), or transparent");
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    COLORREF border_color = RGB(color.red, color.green, color.blue);
+    HRESULT ok = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border_color,
+                                       sizeof(border_color));
+    if (SUCCEEDED(ok)) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__APPLE__)
+    Py_RETURN_FALSE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (!GTK_IS_WINDOW(window)) {
+      Py_RETURN_FALSE;
+    }
+    char css[192];
+    snprintf(css, sizeof(css),
+             "window, .background { border: 1px solid rgba(%u, %u, %u, %.4f); }",
+             static_cast<unsigned int>(color.red),
+             static_cast<unsigned int>(color.green),
+             static_cast<unsigned int>(color.blue),
+             static_cast<double>(color.alpha) / 255.0);
+    GtkCssProvider *provider = gtk_css_provider_new();
+#if GTK_MAJOR_VERSION < 4
+    gtk_css_provider_load_from_data(provider, css, -1, nullptr);
+    GtkStyleContext *context = gtk_widget_get_style_context(window);
+    gtk_style_context_add_provider(
+        context, GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#else
+    gtk_css_provider_load_from_data(provider, css, -1);
+    gtk_style_context_add_provider_for_display(
+        gtk_widget_get_display(window), GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#endif
+    g_object_unref(provider);
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
 PyObject *native_set_visible(PyObject *, PyObject *args) {
   PyObject *capsule = nullptr;
   int visible = 0;
@@ -1318,6 +1712,10 @@ PyMethodDef methods[] = {
      "Toggle native window frame decorations."},
     {"set_backdrop_effect", reinterpret_cast<PyCFunction>(native_set_backdrop_effect),
      METH_VARARGS, "Set native backdrop material/effect."},
+    {"set_background_color", reinterpret_cast<PyCFunction>(native_set_background_color),
+     METH_VARARGS, "Set native window background color."},
+    {"set_border_color", reinterpret_cast<PyCFunction>(native_set_border_color),
+     METH_VARARGS, "Set native window border color."},
     {"set_visible", reinterpret_cast<PyCFunction>(native_set_visible), METH_VARARGS,
      "Toggle native window visibility."},
     {"set_position", reinterpret_cast<PyCFunction>(native_set_position), METH_VARARGS,

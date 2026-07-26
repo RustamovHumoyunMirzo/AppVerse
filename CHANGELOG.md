@@ -6,6 +6,13 @@ The project follows semantic versioning.
 
 ## [1.0.0] - 2026-07-26
 
+### Added
+
+- Added `set_background_color()` with hex, RGBA, transparent, and semantic
+  color support.
+- Added `set_border_color()` for DWM border colors on Windows and a GTK border
+  fallback on Linux.
+
 ### Changed
 
 - Promoted AppVerse from `1.0.0a0` to the stable `1.0.0` package release.

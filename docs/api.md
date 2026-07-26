@@ -142,6 +142,12 @@ Backdrop effect names:
 - `BACKDROP_MICA`
 - `BACKDROP_GLASS`
 
+Semantic colors:
+
+- `Color.TRANSPARENT`
+- `Color.WHITE`
+- `Color.BLACK`
+
 ### `set_min_size(width: int, height: int) -> None`
 
 Sets minimum resize bounds.
@@ -182,6 +188,38 @@ Platform mapping:
 - Windows: DWM system backdrop types (`none`, transient/acrylic, main/mica, tabbed/glass).
 - macOS: `NSVisualEffectView` materials approximating popover, window background, and ultra-thin glass.
 - Linux: compositor-friendly GTK opacity fallback. Real blur depends on the Wayland compositor and is not universally controllable from GTK.
+
+### `set_background_color(color: str) -> bool`
+
+Sets the native window background color. Accepted values are:
+
+- `#RRGGBB`
+- `#RRGGBBAA`
+- `rgb(r, g, b)`
+- `rgba(r, g, b, a)`
+- `transparent`
+- `appverse.Color.TRANSPARENT`
+
+Examples:
+
+```python
+window.set_background_color("#ffffff50")
+window.set_background_color("rgba(255, 255, 255, 0.3)")
+window.set_background_color(appverse.Color.TRANSPARENT)
+window.set_background_color("#ffffff")
+```
+
+On Windows, AppVerse also applies opaque RGB colors to the DWM titlebar,
+border, and title text color when the OS supports those attributes.
+
+### `set_border_color(color: str) -> bool`
+
+Sets the native window border color where supported. It accepts the same color
+formats as `set_background_color()`.
+
+Windows applies the color through DWM. Linux applies a GTK CSS border fallback.
+macOS returns `False` because AppKit does not expose a normal native window
+border color API.
 
 ### `set_fullscreen(fullscreen: bool = True) -> bool`
 

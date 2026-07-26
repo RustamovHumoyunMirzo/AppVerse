@@ -11,6 +11,7 @@
 #if defined(_WIN32)
 #include <shellapi.h>
 #include <windows.h>
+#include <dwmapi.h>
 #elif defined(__APPLE__)
 #include <cstdint>
 #include <objc/message.h>
@@ -20,6 +21,10 @@
 #include <gtk/gtk.h>
 #endif
 
+#if defined(_WIN32) && !defined(DWMWA_SYSTEMBACKDROP_TYPE)
+#define DWMWA_SYSTEMBACKDROP_TYPE 38
+#endif
+
 namespace {
 
 constexpr const char *kCapsuleName = "appverse.WindowHandle";
@@ -27,6 +32,13 @@ constexpr const char *kPreloadHtml =
     "<!doctype html><html><head><meta charset=\"utf-8\"><style>"
     "html,body{margin:0;width:100%;height:100%;background:#101418;}"
     "</style></head><body></body></html>";
+
+enum class BackdropEffect {
+  None,
+  Acrylic,
+  Mica,
+  Glass,
+};
 
 struct BindingContext;
 
@@ -76,10 +88,49 @@ PyObject *none_on_success() {
   Py_RETURN_NONE;
 }
 
+bool parse_backdrop_effect(const char *name, BackdropEffect *effect) {
+  if (!name || !effect) {
+    return false;
+  }
+  std::string value{name};
+  for (auto &ch : value) {
+    if (ch >= 'A' && ch <= 'Z') {
+      ch = static_cast<char>(ch - 'A' + 'a');
+    }
+  }
+  if (value == "none" || value == "off" || value == "solid") {
+    *effect = BackdropEffect::None;
+    return true;
+  }
+  if (value == "acrylic") {
+    *effect = BackdropEffect::Acrylic;
+    return true;
+  }
+  if (value == "mica") {
+    *effect = BackdropEffect::Mica;
+    return true;
+  }
+  if (value == "glass" || value == "tabbed") {
+    *effect = BackdropEffect::Glass;
+    return true;
+  }
+  return false;
+}
+
 #if defined(__APPLE__)
 struct CocoaPoint {
   double x;
   double y;
+};
+
+struct CocoaSize {
+  double width;
+  double height;
+};
+
+struct CocoaRect {
+  CocoaPoint origin;
+  CocoaSize size;
 };
 
 id cocoa_send_id(id receiver, const char *selector) {
@@ -672,6 +723,118 @@ PyObject *native_set_frameless(PyObject *, PyObject *args) {
 #endif
 }
 
+PyObject *native_set_backdrop_effect(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  const char *effect_name = nullptr;
+  if (!PyArg_ParseTuple(args, "Os", &capsule, &effect_name)) {
+    return nullptr;
+  }
+
+  BackdropEffect effect = BackdropEffect::None;
+  if (!parse_backdrop_effect(effect_name, &effect)) {
+    PyErr_SetString(PyExc_ValueError,
+                    "backdrop effect must be one of: none, acrylic, mica, glass");
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    int backdrop = 1;  // DWMSBT_NONE
+    if (effect == BackdropEffect::Mica) {
+      backdrop = 2;  // DWMSBT_MAINWINDOW
+    } else if (effect == BackdropEffect::Acrylic) {
+      backdrop = 3;  // DWMSBT_TRANSIENTWINDOW
+    } else if (effect == BackdropEffect::Glass) {
+      backdrop = 4;  // DWMSBT_TABBEDWINDOW
+    }
+
+    HRESULT ok = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
+                                       &backdrop, sizeof(backdrop));
+    if (SUCCEEDED(ok)) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    using IdFn = id (*)(id, SEL);
+    id content_view = reinterpret_cast<IdFn>(objc_msgSend)(
+        window, sel_registerName("contentView"));
+    if (!content_view) {
+      Py_RETURN_FALSE;
+    }
+
+    using BoolFn = void (*)(id, SEL, bool);
+    reinterpret_cast<BoolFn>(objc_msgSend)(window, sel_registerName("setOpaque:"), false);
+
+    id color = cocoa_send_id(cocoa_class("NSColor"), "clearColor");
+    using SetColorFn = void (*)(id, SEL, id);
+    reinterpret_cast<SetColorFn>(objc_msgSend)(
+        window, sel_registerName("setBackgroundColor:"), color);
+
+    if (effect == BackdropEffect::None) {
+      Py_RETURN_TRUE;
+    }
+
+    id effect_view_class = cocoa_class("NSVisualEffectView");
+    id effect_view = cocoa_send_id(effect_view_class, "alloc");
+    CocoaRect frame{{0.0, 0.0}, {10000.0, 10000.0}};
+    using InitFrameFn = id (*)(id, SEL, CocoaRect);
+    effect_view = reinterpret_cast<InitFrameFn>(objc_msgSend)(
+        effect_view, sel_registerName("initWithFrame:"), frame);
+    if (!effect_view) {
+      Py_RETURN_FALSE;
+    }
+
+    long material = 60;  // NSVisualEffectMaterialPopover
+    if (effect == BackdropEffect::Mica) {
+      material = 12;  // NSVisualEffectMaterialWindowBackground
+    } else if (effect == BackdropEffect::Glass) {
+      material = 6;  // NSVisualEffectMaterialUltraThin
+    }
+
+    using LongFn = void (*)(id, SEL, long);
+    reinterpret_cast<LongFn>(objc_msgSend)(
+        effect_view, sel_registerName("setMaterial:"), material);
+    reinterpret_cast<LongFn>(objc_msgSend)(
+        effect_view, sel_registerName("setBlendingMode:"), 0L);
+    reinterpret_cast<LongFn>(objc_msgSend)(
+        effect_view, sel_registerName("setState:"), 1L);
+    reinterpret_cast<LongFn>(objc_msgSend)(
+        effect_view, sel_registerName("setAutoresizingMask:"), 18L);
+
+    using AddSubviewFn = void (*)(id, SEL, id, long, id);
+    reinterpret_cast<AddSubviewFn>(objc_msgSend)(
+        content_view, sel_registerName("addSubview:positioned:relativeTo:"),
+        effect_view, -1L, nil);
+    cocoa_release(effect_view);
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (!GTK_IS_WINDOW(window)) {
+      Py_RETURN_FALSE;
+    }
+#if GTK_MAJOR_VERSION < 4
+    gtk_widget_set_app_paintable(window, effect != BackdropEffect::None);
+#endif
+    gtk_widget_set_opacity(window, effect == BackdropEffect::None ? 1.0 : 0.94);
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
 PyObject *native_set_visible(PyObject *, PyObject *args) {
   PyObject *capsule = nullptr;
   int visible = 0;
@@ -1153,6 +1316,8 @@ PyMethodDef methods[] = {
      "Set the native window icon."},
     {"set_frameless", reinterpret_cast<PyCFunction>(native_set_frameless), METH_VARARGS,
      "Toggle native window frame decorations."},
+    {"set_backdrop_effect", reinterpret_cast<PyCFunction>(native_set_backdrop_effect),
+     METH_VARARGS, "Set native backdrop material/effect."},
     {"set_visible", reinterpret_cast<PyCFunction>(native_set_visible), METH_VARARGS,
      "Toggle native window visibility."},
     {"set_position", reinterpret_cast<PyCFunction>(native_set_position), METH_VARARGS,

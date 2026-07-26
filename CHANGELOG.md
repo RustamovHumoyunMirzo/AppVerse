@@ -36,6 +36,8 @@ The project follows semantic versioning while the public API matures.
   areas.
 - Added app-region double-click maximize/restore behavior through native
   `toggle_maximize()`.
+- Added `set_backdrop_effect()` with AppVerse backdrop constants for Windows
+  DWM backdrops, macOS visual effects, and a Linux GTK translucency fallback.
 - Expanded native window APIs across platforms: macOS app icon, frameless,
   position, fullscreen, and restore behavior; GTK3 icon and frameless support;
   explicit Win32 fullscreen state restore and system-menu state syncing.

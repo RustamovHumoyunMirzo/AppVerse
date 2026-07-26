@@ -28,6 +28,11 @@ HIDE: Final[str] = "hide"
 DESTROY: Final[str] = "destroy"
 MESSAGE: Final[str] = "message"
 ERROR: Final[str] = "error"
+
+BACKDROP_NONE: Final[str] = "none"
+BACKDROP_ACRYLIC: Final[str] = "acrylic"
+BACKDROP_MICA: Final[str] = "mica"
+BACKDROP_GLASS: Final[str] = "glass"
 READY_TO_SHOW: Final[str] = "ready_to_show"
 
 
@@ -320,6 +325,9 @@ class Window:
     def set_frameless(self, frameless: bool = True) -> bool:
         return bool(_native.set_frameless(self._handle, frameless))
 
+    def set_backdrop_effect(self, effect: str) -> bool:
+        return bool(_native.set_backdrop_effect(self._handle, effect))
+
     def show(self) -> bool:
         applied = bool(_native.set_visible(self._handle, True))
         self._visible = True
@@ -510,6 +518,10 @@ __all__ = [
     "HINT_MAX",
     "HINT_MIN",
     "HINT_NONE",
+    "BACKDROP_ACRYLIC",
+    "BACKDROP_GLASS",
+    "BACKDROP_MICA",
+    "BACKDROP_NONE",
     "MESSAGE",
     "READY",
     "READY_REVEAL_JS",

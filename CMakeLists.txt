@@ -38,7 +38,7 @@ if(APPLE)
 endif()
 
 if(WIN32)
-  target_link_libraries(pyverse_native PRIVATE shell32)
+  target_link_libraries(pyverse_native PRIVATE dwmapi shell32)
 endif()
 
 set_target_properties(pyverse_native PROPERTIES

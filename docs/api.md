@@ -135,6 +135,13 @@ Sets the window size. Size hints are:
 - `HINT_MAX`
 - `HINT_FIXED`
 
+Backdrop effect names:
+
+- `BACKDROP_NONE`
+- `BACKDROP_ACRYLIC`
+- `BACKDROP_MICA`
+- `BACKDROP_GLASS`
+
 ### `set_min_size(width: int, height: int) -> None`
 
 Sets minimum resize bounds.
@@ -162,7 +169,19 @@ icon. GTK3 Linux builds apply the icon through GTK.
 ### `set_frameless(frameless: bool = True) -> bool`
 
 Attempts to toggle native frame decorations. Returns `True` when supported and
-applied. The current native implementation supports Windows.
+applied. The native implementation supports Windows, macOS, and GTK Linux.
+
+### `set_backdrop_effect(effect: str) -> bool`
+
+Applies a native translucent backdrop where supported. Accepted values are
+`"none"`, `"acrylic"`, `"mica"`, and `"glass"`; the same strings are exported as
+`BACKDROP_NONE`, `BACKDROP_ACRYLIC`, `BACKDROP_MICA`, and `BACKDROP_GLASS`.
+
+Platform mapping:
+
+- Windows: DWM system backdrop types (`none`, transient/acrylic, main/mica, tabbed/glass).
+- macOS: `NSVisualEffectView` materials approximating popover, window background, and ultra-thin glass.
+- Linux: compositor-friendly GTK opacity fallback. Real blur depends on the Wayland compositor and is not universally controllable from GTK.
 
 ### `set_fullscreen(fullscreen: bool = True) -> bool`
 

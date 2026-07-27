@@ -17,6 +17,10 @@ def main() -> None:
         debug=False,
     )
 
+    window.add_menu("File")
+    window.add_menu("Edit")
+    window.add_menu("View")
+    window.add_menu_item(("File",),"New", lambda win, item: print(item["label"]))
     window.load_html(r"examples\html\index.html")
     window.run()
 

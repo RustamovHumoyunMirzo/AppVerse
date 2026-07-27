@@ -31,6 +31,8 @@ The project follows semantic versioning.
   native window backends.
 - Added native menubar support with menus, submenus, separators, item callbacks,
   and menu click events across supported platforms.
+- Added a declarative `set_menu()` API and string-keyed menu events for easier
+  native menubar setup.
 
 ### Changed
 

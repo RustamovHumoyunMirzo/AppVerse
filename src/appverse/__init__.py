@@ -6,7 +6,7 @@ from pathlib import Path
 import json
 import os
 import re
-from typing import Any, Callable, DefaultDict, Final
+from typing import Any, Callable, DefaultDict, Final, Sequence
 
 
 if os.name == "nt" and hasattr(os, "add_dll_directory"):
@@ -287,6 +287,7 @@ class Window:
         self._bindings: dict[str, BindingHandler] = {}
         self._menu_next_id = 1
         self._menu_items: dict[int, dict[str, Any]] = {}
+        self._menu_keys: dict[str, int] = {}
 
         self.init(APPVERSE_BRIDGE_JS)
         if options.show_when_ready:
@@ -705,42 +706,69 @@ class Window:
             return decorator
         return decorator(handler)
 
+    def _menu_path(self, path: str | Sequence[str] | None) -> tuple[str, ...]:
+        if path is None:
+            return ()
+        if isinstance(path, str):
+            return tuple(part for part in path.replace("\\", "/").split("/") if part)
+        return tuple(str(part) for part in path)
+
+    def _menu_native_id(self, item_id: int | str | None, label: str) -> tuple[int, str | None]:
+        key = item_id if isinstance(item_id, str) else None
+        if key is not None and key in self._menu_keys:
+            return self._menu_keys[key], key
+        if isinstance(item_id, int):
+            native_id = item_id
+        else:
+            native_id = self._menu_next_id
+            self._menu_next_id += 1
+        if native_id <= 0:
+            raise ValueError("menu item id must be positive")
+        if key is None and label:
+            key = label.strip().lower().replace(" ", "_").replace("&", "")
+            if key in self._menu_keys:
+                key = f"{key}_{native_id}"
+        if key is not None:
+            self._menu_keys[key] = native_id
+        return native_id, key
+
     def add_menu(self, label: str) -> bool:
         return bool(_native.add_menu_item(self._handle, (), label, 0, True, False, None))
 
-    def add_submenu(self, path: tuple[str, ...] | list[str], label: str) -> bool:
-        return bool(_native.add_menu_item(self._handle, tuple(path), label, 0, True, False, None))
+    def add_submenu(self, path: str | Sequence[str], label: str) -> bool:
+        return bool(_native.add_menu_item(self._handle, self._menu_path(path), label, 0, True, False, None))
 
-    def add_menu_separator(self, path: tuple[str, ...] | list[str]) -> bool:
-        return bool(_native.add_menu_item(self._handle, tuple(path), "", 0, True, True, None))
+    def add_menu_separator(self, path: str | Sequence[str]) -> bool:
+        return bool(_native.add_menu_item(self._handle, self._menu_path(path), "", 0, True, True, None))
 
     def add_menu_item(
         self,
-        path: tuple[str, ...] | list[str],
+        path: str | Sequence[str],
         label: str,
         handler: EventHandler | None = None,
         *,
         enabled: bool = True,
-        item_id: int | None = None,
+        item_id: int | str | None = None,
+        key: str | None = None,
     ) -> int:
-        if item_id is None:
-            item_id = self._menu_next_id
-            self._menu_next_id += 1
-        if item_id <= 0:
-            raise ValueError("menu item_id must be positive")
+        menu_path = self._menu_path(path)
+        native_id, item_key = self._menu_native_id(key or item_id, label)
 
         info = {
-            "id": item_id,
-            "path": tuple(path),
+            "id": native_id,
+            "key": item_key,
+            "path": menu_path,
             "label": label,
             "enabled": enabled,
         }
-        self._menu_items[item_id] = info
+        self._menu_items[native_id] = info
 
         def adapter(native_item_id: int) -> None:
             item = self._menu_items.get(native_item_id, info)
             self.emit(MENU, self, item)
             self.emit(f"menu:{native_item_id}", self, item)
+            if item.get("key"):
+                self.emit(f"menu:{item['key']}", self, item)
             if handler is not None:
                 try:
                     handler(self, item)
@@ -750,18 +778,67 @@ class Window:
         applied = bool(
             _native.add_menu_item(
                 self._handle,
-                tuple(path),
+                menu_path,
                 label,
-                item_id,
+                native_id,
                 enabled,
                 False,
                 adapter,
             )
         )
         if not applied:
-            self._menu_items.pop(item_id, None)
+            self._menu_items.pop(native_id, None)
+            if item_key:
+                self._menu_keys.pop(item_key, None)
             raise RuntimeError("native menu item could not be added")
-        return item_id
+        return native_id
+
+    def on_menu(self, item_id: int | str, handler: EventHandler | None = None):
+        return self.on(f"menu:{item_id}", handler)
+
+    def set_menu(self, template: Sequence[Any]) -> dict[str, int]:
+        ids: dict[str, int] = {}
+
+        def add_entries(entries: Sequence[Any], path: tuple[str, ...]) -> None:
+            for entry in entries:
+                if entry in ("-", None):
+                    self.add_menu_separator(path)
+                    continue
+                if isinstance(entry, str):
+                    if path:
+                        self.add_menu_item(path, entry)
+                    else:
+                        self.add_menu(entry)
+                    continue
+                if not isinstance(entry, dict):
+                    raise TypeError("menu entries must be dicts, strings, '-', or None")
+
+                label = str(entry.get("label", ""))
+                if entry.get("separator") or entry.get("type") == "separator":
+                    self.add_menu_separator(path)
+                    continue
+                children = entry.get("children", entry.get("items"))
+                if children is not None:
+                    if path:
+                        self.add_submenu(path, label)
+                    else:
+                        self.add_menu(label)
+                    add_entries(children, path + (label,))
+                    continue
+
+                item_key = entry.get("id", entry.get("key"))
+                native_id = self.add_menu_item(
+                    path,
+                    label,
+                    entry.get("handler", entry.get("on_click")),
+                    enabled=bool(entry.get("enabled", True)),
+                    key=str(item_key) if item_key is not None else None,
+                )
+                if item_key is not None:
+                    ids[str(item_key)] = native_id
+
+        add_entries(template, ())
+        return ids
 
     def unbind(self, name: str) -> None:
         self._bindings.pop(name, None)

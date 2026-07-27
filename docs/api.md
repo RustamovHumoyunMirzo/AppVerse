@@ -492,26 +492,64 @@ AppVerse supports native menubars with top-level menus, submenus, separators,
 clickable custom items, and Python callbacks.
 
 ```python
-window.add_menu("File")
-window.add_menu_item(("File",), "New", lambda win, item: print(item["label"]))
-window.add_menu_separator(("File",))
-window.add_submenu(("File",), "Recent")
-window.add_menu_item(("File", "Recent"), "Project 1")
+window.set_menu([
+    {
+        "label": "File",
+        "children": [
+            {"id": "new", "label": "New", "handler": new_file},
+            {"id": "open", "label": "Open", "enabled": True},
+            "-",
+            {
+                "label": "Recent",
+                "children": [
+                    {"id": "recent_1", "label": "Project 1"},
+                ],
+            },
+        ],
+    },
+    {
+        "label": "Help",
+        "children": [
+            {"id": "about", "label": "About"},
+        ],
+    },
+])
 
 @window.on(appverse.MENU)
 def on_menu(win, item):
-    print("menu clicked", item["id"], item["label"])
+    print("menu clicked", item["key"], item["label"])
+
+@window.on_menu("open")
+def on_open(win, item):
+    ...
 ```
 
 Methods:
 
+- `set_menu(template: Sequence[Any]) -> dict[str, int]`
 - `add_menu(label: str) -> bool`
 - `add_submenu(path: Sequence[str], label: str) -> bool`
 - `add_menu_separator(path: Sequence[str]) -> bool`
-- `add_menu_item(path: Sequence[str], label: str, handler=None, *, enabled=True, item_id=None) -> int`
+- `add_menu_item(path: str | Sequence[str], label: str, handler=None, *, enabled=True, item_id=None, key=None) -> int`
+- `on_menu(item_id: int | str, handler=None)`
 
-Menu item clicks emit `appverse.MENU` and `menu:<item_id>`. If a handler is
-provided to `add_menu_item()`, AppVerse calls it after emitting events.
+`set_menu()` is the recommended high-level API. Each entry can be a top-level
+menu, nested submenu, menu item, `"-"` separator, or `{"separator": True}`.
+Use `id` or `key` for stable event names.
+
+Menu item clicks emit `appverse.MENU`, `menu:<numeric_id>`, and `menu:<key>`
+when a key exists. If a handler is provided to `add_menu_item()` or in the menu
+template, AppVerse calls it after emitting events.
+
+Manual menu building is still available:
+
+```python
+window.add_menu("File")
+window.add_menu_item("File", "Open", key="open")
+window.add_menu_separator("File")
+window.add_submenu("File", "Recent")
+window.add_menu_item(("File", "Recent"), "Project 1")
+```
 
 Platform behavior:
 

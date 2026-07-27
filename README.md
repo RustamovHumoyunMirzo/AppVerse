@@ -13,7 +13,7 @@ WebView2 on Windows, WKWebView on macOS, and WebKitGTK on Linux.
 
 ## Status
 
-AppVerse 1.0.0 provides a production-ready native webview foundation for Python
+AppVerse provides a production-ready native webview foundation for Python
 desktop apps:
 
 ```python

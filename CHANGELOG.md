@@ -4,6 +4,22 @@ All notable changes to AppVerse will be documented in this file.
 
 The project follows semantic versioning.
 
+## [1.3.1] - 2026-07-27
+
+### Added
+
+- Added window capability flags and getters for resizable, movable,
+  always-on-top, taskbar visibility, closable, minimizable, and maximizable
+  behavior.
+- Added rounded-corner constructor option, setter, and getters across supported
+  native window backends.
+- Added native menubar support with menus, submenus, separators, item callbacks,
+  and menu click events across supported platforms.
+- Added a declarative `set_menu()` API and string-keyed menu events for easier
+  native menubar setup.
+- Added native menubar appearance customization via supported platform APIs.
+- Added native checkbox/radio menu items and menu item state update helpers.
+
 ## [1.0.0] - 2026-07-26
 
 ### Added
@@ -24,17 +40,6 @@ The project follows semantic versioning.
   devtools are disabled.
 - Added hardware-acceleration preferences for GPU/WebGL-oriented webview
   performance tuning across supported backends.
-- Added window capability flags and getters for resizable, movable,
-  always-on-top, taskbar visibility, closable, minimizable, and maximizable
-  behavior.
-- Added rounded-corner constructor option, setter, and getters across supported
-  native window backends.
-- Added native menubar support with menus, submenus, separators, item callbacks,
-  and menu click events across supported platforms.
-- Added a declarative `set_menu()` API and string-keyed menu events for easier
-  native menubar setup.
-- Added native menubar appearance customization via supported platform APIs.
-- Added native checkbox/radio menu items and menu item state update helpers.
 
 ### Changed
 

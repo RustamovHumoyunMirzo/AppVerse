@@ -70,6 +70,13 @@ struct WindowHandle {
   bool devtools_enabled = false;
   bool hardware_acceleration_enabled = true;
   bool shadow_enabled = true;
+  bool resizable = true;
+  bool movable = true;
+  bool always_on_top = false;
+  bool skip_taskbar = false;
+  bool closable = true;
+  bool minimizable = true;
+  bool maximizable = true;
   std::string shadow_style = "system";
 #if defined(_WIN32)
   bool fullscreen = false;
@@ -553,6 +560,202 @@ bool apply_hardware_acceleration_enabled(WindowHandle *handle, bool enabled) {
   return applied;
 #else
   return false;
+#endif
+}
+
+bool set_window_capability_state(WindowHandle *handle, const std::string &name,
+                                 bool enabled) {
+  if (name == "resizable") {
+    handle->resizable = enabled;
+  } else if (name == "movable") {
+    handle->movable = enabled;
+  } else if (name == "always_on_top" || name == "always-on-top" ||
+             name == "alwaysontop") {
+    handle->always_on_top = enabled;
+  } else if (name == "skip_taskbar" || name == "skip-taskbar" ||
+             name == "hidden_taskbar" || name == "hidden-taskbar") {
+    handle->skip_taskbar = enabled;
+  } else if (name == "closable") {
+    handle->closable = enabled;
+  } else if (name == "minimizable" || name == "minimizeable") {
+    handle->minimizable = enabled;
+  } else if (name == "maximizable" || name == "maximizeable") {
+    handle->maximizable = enabled;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool get_window_capability_state(WindowHandle *handle, const std::string &name,
+                                 bool *enabled) {
+  if (!enabled) {
+    return false;
+  }
+  if (name == "resizable") {
+    *enabled = handle->resizable;
+  } else if (name == "movable") {
+    *enabled = handle->movable;
+  } else if (name == "always_on_top" || name == "always-on-top" ||
+             name == "alwaysontop") {
+    *enabled = handle->always_on_top;
+  } else if (name == "skip_taskbar" || name == "skip-taskbar" ||
+             name == "hidden_taskbar" || name == "hidden-taskbar") {
+    *enabled = handle->skip_taskbar;
+  } else if (name == "closable") {
+    *enabled = handle->closable;
+  } else if (name == "minimizable" || name == "minimizeable") {
+    *enabled = handle->minimizable;
+  } else if (name == "maximizable" || name == "maximizeable") {
+    *enabled = handle->maximizable;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool apply_window_capability(WindowHandle *handle, const std::string &name,
+                             bool enabled) {
+  if (!handle || !handle->window ||
+      !set_window_capability_state(handle, name, enabled)) {
+    return false;
+  }
+
+  auto result = handle->window->window();
+  result.ensure_ok();
+#if defined(_WIN32)
+  auto *hwnd = static_cast<HWND>(result.value());
+  LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+  LONG_PTR ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+
+  if (name == "resizable") {
+    if (enabled) {
+      style |= WS_THICKFRAME;
+    } else {
+      style &= ~WS_THICKFRAME;
+    }
+  } else if (name == "minimizable" || name == "minimizeable") {
+    if (enabled) {
+      style |= WS_MINIMIZEBOX;
+    } else {
+      style &= ~WS_MINIMIZEBOX;
+    }
+  } else if (name == "maximizable" || name == "maximizeable") {
+    if (enabled) {
+      style |= WS_MAXIMIZEBOX;
+    } else {
+      style &= ~WS_MAXIMIZEBOX;
+    }
+  } else if (name == "closable") {
+    HMENU menu = GetSystemMenu(hwnd, FALSE);
+    if (menu) {
+      EnableMenuItem(menu, SC_CLOSE,
+                     MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
+      DrawMenuBar(hwnd);
+    }
+  } else if (name == "always_on_top" || name == "always-on-top" ||
+             name == "alwaysontop") {
+    SetWindowPos(hwnd, enabled ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE);
+    return true;
+  } else if (name == "skip_taskbar" || name == "skip-taskbar" ||
+             name == "hidden_taskbar" || name == "hidden-taskbar") {
+    if (enabled) {
+      ex_style |= WS_EX_TOOLWINDOW;
+      ex_style &= ~WS_EX_APPWINDOW;
+    } else {
+      ex_style &= ~WS_EX_TOOLWINDOW;
+      ex_style |= WS_EX_APPWINDOW;
+    }
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+  } else if (name == "movable") {
+    return true;
+  }
+
+  SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+  SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+  return true;
+#elif defined(__APPLE__)
+  auto window = static_cast<id>(result.value());
+  constexpr unsigned long long closable = 1ULL << 1;
+  constexpr unsigned long long miniaturizable = 1ULL << 2;
+  constexpr unsigned long long resizable = 1ULL << 3;
+  auto style = cocoa_unsigned_long_long(window, "styleMask");
+  bool style_changed = false;
+
+  if (name == "resizable") {
+    style = enabled ? (style | resizable) : (style & ~resizable);
+    style_changed = true;
+  } else if (name == "closable") {
+    style = enabled ? (style | closable) : (style & ~closable);
+    style_changed = true;
+  } else if (name == "minimizable" || name == "minimizeable") {
+    style = enabled ? (style | miniaturizable) : (style & ~miniaturizable);
+    style_changed = true;
+  } else if (name == "maximizable" || name == "maximizeable") {
+    using ButtonFn = id (*)(id, SEL, unsigned long long);
+    using EnabledFn = void (*)(id, SEL, bool);
+    id button = reinterpret_cast<ButtonFn>(objc_msgSend)(
+        window, sel_registerName("standardWindowButton:"), 2ULL);
+    if (button) {
+      reinterpret_cast<EnabledFn>(objc_msgSend)(
+          button, sel_registerName("setEnabled:"), enabled);
+    }
+  } else if (name == "movable") {
+    using BoolFn = void (*)(id, SEL, bool);
+    reinterpret_cast<BoolFn>(objc_msgSend)(
+        window, sel_registerName("setMovable:"), enabled);
+  } else if (name == "always_on_top" || name == "always-on-top" ||
+             name == "alwaysontop") {
+    using LevelFn = void (*)(id, SEL, long);
+    reinterpret_cast<LevelFn>(objc_msgSend)(
+        window, sel_registerName("setLevel:"), enabled ? 3L : 0L);
+  } else if (name == "skip_taskbar" || name == "skip-taskbar" ||
+             name == "hidden_taskbar" || name == "hidden-taskbar") {
+    auto behavior = cocoa_unsigned_long_long(window, "collectionBehavior");
+    constexpr unsigned long long transient_behavior = 1ULL << 3;
+    using BehaviorFn = void (*)(id, SEL, unsigned long long);
+    reinterpret_cast<BehaviorFn>(objc_msgSend)(
+        window, sel_registerName("setCollectionBehavior:"),
+        enabled ? (behavior | transient_behavior)
+                : (behavior & ~transient_behavior));
+  }
+
+  if (style_changed) {
+    using StyleFn = void (*)(id, SEL, unsigned long long);
+    reinterpret_cast<StyleFn>(objc_msgSend)(
+        window, sel_registerName("setStyleMask:"), style);
+  }
+  return true;
+#elif defined(__linux__)
+  auto *window = static_cast<GtkWidget *>(result.value());
+  if (!GTK_IS_WINDOW(window)) {
+    return false;
+  }
+  if (name == "resizable") {
+    gtk_window_set_resizable(GTK_WINDOW(window), enabled);
+    return true;
+  }
+#if GTK_MAJOR_VERSION < 4
+  if (name == "always_on_top" || name == "always-on-top" ||
+      name == "alwaysontop") {
+    gtk_window_set_keep_above(GTK_WINDOW(window), enabled);
+    return true;
+  }
+  if (name == "skip_taskbar" || name == "skip-taskbar" ||
+      name == "hidden_taskbar" || name == "hidden-taskbar") {
+    gtk_window_set_skip_taskbar_hint(GTK_WINDOW(window), enabled);
+    return true;
+  }
+  if (name == "closable") {
+    gtk_window_set_deletable(GTK_WINDOW(window), enabled);
+    return true;
+  }
+#endif
+  return true;
+#else
+  return true;
 #endif
 }
 
@@ -1733,6 +1936,53 @@ PyObject *native_set_visible(PyObject *, PyObject *args) {
   }
 }
 
+PyObject *native_set_window_capability(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  const char *name_text = nullptr;
+  int enabled = 1;
+  if (!PyArg_ParseTuple(args, "Osp", &capsule, &name_text, &enabled)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+    if (apply_window_capability(handle, normalized_text(name_text), enabled != 0)) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_get_window_capability(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  const char *name_text = nullptr;
+  if (!PyArg_ParseTuple(args, "Os", &capsule, &name_text)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  bool enabled = false;
+  if (!get_window_capability_state(handle, normalized_text(name_text), &enabled)) {
+    PyErr_SetString(PyExc_ValueError, "unknown window capability");
+    return nullptr;
+  }
+  if (enabled) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject *native_set_position(PyObject *, PyObject *args) {
   PyObject *capsule = nullptr;
   int x = 0;
@@ -1744,6 +1994,9 @@ PyObject *native_set_position(PyObject *, PyObject *args) {
   auto *handle = get_handle(capsule);
   if (!handle) {
     return nullptr;
+  }
+  if (!handle->movable) {
+    Py_RETURN_FALSE;
   }
 
   try {
@@ -1784,6 +2037,9 @@ PyObject *native_minimize(PyObject *, PyObject *args) {
   auto *handle = get_handle(capsule);
   if (!handle) {
     return nullptr;
+  }
+  if (!handle->minimizable) {
+    Py_RETURN_FALSE;
   }
 
   try {
@@ -1826,6 +2082,9 @@ PyObject *native_maximize(PyObject *, PyObject *args) {
   auto *handle = get_handle(capsule);
   if (!handle) {
     return nullptr;
+  }
+  if (!handle->maximizable) {
+    Py_RETURN_FALSE;
   }
 
   try {
@@ -1918,6 +2177,9 @@ PyObject *native_toggle_maximize(PyObject *, PyObject *args) {
   auto *handle = get_handle(capsule);
   if (!handle) {
     return nullptr;
+  }
+  if (!handle->maximizable) {
+    Py_RETURN_FALSE;
   }
 
   try {
@@ -2388,6 +2650,9 @@ PyObject *native_start_drag(PyObject *, PyObject *args) {
   if (!handle) {
     return nullptr;
   }
+  if (!handle->movable) {
+    Py_RETURN_FALSE;
+  }
 
   try {
     auto result = handle->window->window();
@@ -2537,6 +2802,10 @@ PyMethodDef methods[] = {
      "Set native window shadow state/style."},
     {"set_visible", reinterpret_cast<PyCFunction>(native_set_visible), METH_VARARGS,
      "Toggle native window visibility."},
+    {"set_window_capability", reinterpret_cast<PyCFunction>(native_set_window_capability),
+     METH_VARARGS, "Toggle a native window capability flag."},
+    {"get_window_capability", reinterpret_cast<PyCFunction>(native_get_window_capability),
+     METH_VARARGS, "Return a native window capability flag."},
     {"set_position", reinterpret_cast<PyCFunction>(native_set_position), METH_VARARGS,
      "Set native window position."},
     {"minimize", reinterpret_cast<PyCFunction>(native_minimize), METH_VARARGS,

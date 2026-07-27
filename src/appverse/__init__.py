@@ -181,6 +181,13 @@ class WindowOptions:
     frameless: bool = False
     fullscreen: bool = False
     fullscreenable: bool = True
+    resizable: bool = True
+    movable: bool = True
+    always_on_top: bool = False
+    skip_taskbar: bool = False
+    closable: bool = True
+    minimizable: bool = True
+    maximizable: bool = True
     icon: str | os.PathLike[str] | None = None
     visible: bool = True
     show_when_ready: bool = False
@@ -215,6 +222,13 @@ class Window:
         frameless: bool = False,
         fullscreen: bool = False,
         fullscreenable: bool = True,
+        resizable: bool = True,
+        movable: bool = True,
+        always_on_top: bool = False,
+        skip_taskbar: bool = False,
+        closable: bool = True,
+        minimizable: bool = True,
+        maximizable: bool = True,
         icon: str | os.PathLike[str] | None = None,
         visible: bool = True,
         show_when_ready: bool = False,
@@ -241,6 +255,13 @@ class Window:
                 frameless=frameless,
                 fullscreen=fullscreen,
                 fullscreenable=fullscreenable,
+                resizable=resizable,
+                movable=movable,
+                always_on_top=always_on_top,
+                skip_taskbar=skip_taskbar,
+                closable=closable,
+                minimizable=minimizable,
+                maximizable=maximizable,
                 icon=icon,
                 visible=visible,
                 show_when_ready=show_when_ready,
@@ -286,6 +307,13 @@ class Window:
         if options.frameless:
             self.set_frameless(True)
         self.set_fullscreenable(options.fullscreenable)
+        self.set_resizable(options.resizable)
+        self.set_movable(options.movable)
+        self.set_always_on_top(options.always_on_top)
+        self.set_skip_taskbar(options.skip_taskbar)
+        self.set_closable(options.closable)
+        self.set_minimizable(options.minimizable)
+        self.set_maximizable(options.maximizable)
         if options.fullscreen:
             self.set_fullscreen(True)
         if options.icon is not None:
@@ -424,6 +452,67 @@ class Window:
                 -1 if visible is None else int(visible),
             )
         )
+
+    def _set_capability(self, name: str, enabled: bool) -> bool:
+        set_window_capability = getattr(_native, "set_window_capability", None)
+        setattr(self.options, name, enabled)
+        if set_window_capability is None:
+            return False
+        return bool(set_window_capability(self._handle, name, enabled))
+
+    def _get_capability(self, name: str, fallback: bool) -> bool:
+        get_window_capability = getattr(_native, "get_window_capability", None)
+        if get_window_capability is None:
+            return fallback
+        return bool(get_window_capability(self._handle, name))
+
+    def set_resizable(self, resizable: bool = True) -> bool:
+        return self._set_capability("resizable", resizable)
+
+    def is_resizable(self) -> bool:
+        return self._get_capability("resizable", self.options.resizable)
+
+    def set_movable(self, movable: bool = True) -> bool:
+        return self._set_capability("movable", movable)
+
+    def is_movable(self) -> bool:
+        return self._get_capability("movable", self.options.movable)
+
+    def set_always_on_top(self, always_on_top: bool = True) -> bool:
+        return self._set_capability("always_on_top", always_on_top)
+
+    def is_always_on_top(self) -> bool:
+        return self._get_capability("always_on_top", self.options.always_on_top)
+
+    def set_skip_taskbar(self, skip_taskbar: bool = True) -> bool:
+        return self._set_capability("skip_taskbar", skip_taskbar)
+
+    def is_skip_taskbar(self) -> bool:
+        return self._get_capability("skip_taskbar", self.options.skip_taskbar)
+
+    def set_hidden_taskbar(self, hidden: bool = True) -> bool:
+        return self.set_skip_taskbar(hidden)
+
+    def is_hidden_taskbar(self) -> bool:
+        return self.is_skip_taskbar()
+
+    def set_closable(self, closable: bool = True) -> bool:
+        return self._set_capability("closable", closable)
+
+    def is_closable(self) -> bool:
+        return self._get_capability("closable", self.options.closable)
+
+    def set_minimizable(self, minimizable: bool = True) -> bool:
+        return self._set_capability("minimizable", minimizable)
+
+    def is_minimizable(self) -> bool:
+        return self._get_capability("minimizable", self.options.minimizable)
+
+    def set_maximizable(self, maximizable: bool = True) -> bool:
+        return self._set_capability("maximizable", maximizable)
+
+    def is_maximizable(self) -> bool:
+        return self._get_capability("maximizable", self.options.maximizable)
 
     def is_visible(self) -> bool:
         is_visible = getattr(_native, "is_visible", None)

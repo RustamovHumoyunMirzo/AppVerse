@@ -24,6 +24,9 @@ The project follows semantic versioning.
   devtools are disabled.
 - Added hardware-acceleration preferences for GPU/WebGL-oriented webview
   performance tuning across supported backends.
+- Added window capability flags and getters for resizable, movable,
+  always-on-top, taskbar visibility, closable, minimizable, and maximizable
+  behavior.
 
 ### Changed
 

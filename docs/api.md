@@ -26,6 +26,13 @@ Creates a native webview window. Accepted options mirror `WindowOptions`:
 - `frameless`
 - `fullscreen`
 - `fullscreenable`
+- `resizable`
+- `movable`
+- `always_on_top`
+- `skip_taskbar`
+- `closable`
+- `minimizable`
+- `maximizable`
 - `icon`
 - `visible`
 - `show_when_ready`
@@ -53,6 +60,13 @@ appverse.WindowOptions(
     frameless=False,
     fullscreen=False,
     fullscreenable=True,
+    resizable=True,
+    movable=True,
+    always_on_top=False,
+    skip_taskbar=False,
+    closable=True,
+    minimizable=True,
+    maximizable=True,
     icon=None,
     visible=True,
     show_when_ready=False,
@@ -335,6 +349,44 @@ through window collection behavior where AppKit supports it.
 ### `is_fullscreenable() -> bool`
 
 Returns whether fullscreen is currently allowed.
+
+### Window Capability Flags
+
+AppVerse exposes native window capability flags as constructor options, setters,
+and getters:
+
+```python
+window = appverse.create_window(
+    resizable=True,
+    movable=True,
+    always_on_top=False,
+    skip_taskbar=False,
+    closable=True,
+    minimizable=True,
+    maximizable=True,
+)
+
+window.set_always_on_top(True)
+window.set_resizable(False)
+window.is_always_on_top()
+```
+
+Available methods:
+
+- `set_resizable(value: bool = True) -> bool` / `is_resizable() -> bool`
+- `set_movable(value: bool = True) -> bool` / `is_movable() -> bool`
+- `set_always_on_top(value: bool = True) -> bool` / `is_always_on_top() -> bool`
+- `set_skip_taskbar(value: bool = True) -> bool` / `is_skip_taskbar() -> bool`
+- `set_hidden_taskbar(value: bool = True) -> bool` / `is_hidden_taskbar() -> bool`
+- `set_closable(value: bool = True) -> bool` / `is_closable() -> bool`
+- `set_minimizable(value: bool = True) -> bool` / `is_minimizable() -> bool`
+- `set_maximizable(value: bool = True) -> bool` / `is_maximizable() -> bool`
+
+Windows maps these to window styles, extended styles, topmost state, and the
+system menu close command. macOS maps them to `NSWindow` style masks, movable
+state, window level, and collection behavior where available. Linux maps
+resizable/topmost/taskbar/closable to GTK window APIs where supported and tracks
+the remaining flags for consistent getters.
 
 ### `is_fullscreen() -> bool`
 

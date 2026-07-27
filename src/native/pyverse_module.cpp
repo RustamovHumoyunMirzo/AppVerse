@@ -327,6 +327,12 @@ HMENU ensure_win32_menu(WindowHandle *handle, HWND hwnd,
 }
 #endif
 
+#if defined(__APPLE__)
+id cocoa_class(const char *name);
+id cocoa_string(const char *utf8);
+void cocoa_release(id object);
+#endif
+
 bool apply_menu_item_state(WindowHandle *handle, int item_id) {
   if (!handle) {
     return false;
@@ -356,7 +362,7 @@ bool apply_menu_item_state(WindowHandle *handle, int item_id) {
   }
   return true;
 #elif defined(__APPLE__)
-  auto item = static_cast<id>(item_found->second);
+  auto item = reinterpret_cast<id>(item_found->second);
   using EnabledFn = void (*)(id, SEL, bool);
   reinterpret_cast<EnabledFn>(objc_msgSend)(
       item, sel_registerName("setEnabled:"), state.enabled);
@@ -1577,7 +1583,7 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
         std::string key = menu_key(key_parts);
         auto found = handle->menu_containers.find(key);
         if (found != handle->menu_containers.end()) {
-          parent = static_cast<id>(found->second);
+          parent = reinterpret_cast<id>(found->second);
           continue;
         }
         id title = cocoa_string(part.c_str());
@@ -1597,7 +1603,7 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
         using AddItemFn = void (*)(id, SEL, id);
         reinterpret_cast<AddItemFn>(objc_msgSend)(
             parent, sel_registerName("addItem:"), item);
-        handle->menu_containers[key] = submenu;
+        handle->menu_containers[key] = reinterpret_cast<void *>(submenu);
         parent = submenu;
         cocoa_release(title);
         cocoa_release(empty);
@@ -1609,8 +1615,9 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
     if (!menu_target) {
       Class cls = objc_getClass("AppVerseMenuTarget");
       if (!cls) {
-        cls = objc_allocateClassPair(cocoa_class("NSObject"),
-                                     "AppVerseMenuTarget", 0);
+        cls = objc_allocateClassPair(
+            reinterpret_cast<Class>(cocoa_class("NSObject")),
+            "AppVerseMenuTarget", 0);
         auto action = +[](id, SEL, id sender) {
           using TagFn = long (*)(id, SEL);
           long tag = reinterpret_cast<TagFn>(objc_msgSend)(
@@ -1657,7 +1664,7 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
       using AddItemFn = void (*)(id, SEL, id);
       reinterpret_cast<AddItemFn>(objc_msgSend)(
           parent, sel_registerName("addItem:"), item);
-      handle->menu_items[item_id] = item;
+      handle->menu_items[item_id] = reinterpret_cast<void *>(item);
       cocoa_release(title);
       cocoa_release(empty);
     }

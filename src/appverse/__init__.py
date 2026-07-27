@@ -733,13 +733,13 @@ class Window:
         return native_id, key
 
     def add_menu(self, label: str) -> bool:
-        return bool(_native.add_menu_item(self._handle, (), label, 0, True, False, None))
+        return bool(_native.add_menu_item(self._handle, (), label, 0, True, False, None, "normal", False, None))
 
     def add_submenu(self, path: str | Sequence[str], label: str) -> bool:
-        return bool(_native.add_menu_item(self._handle, self._menu_path(path), label, 0, True, False, None))
+        return bool(_native.add_menu_item(self._handle, self._menu_path(path), label, 0, True, False, None, "normal", False, None))
 
     def add_menu_separator(self, path: str | Sequence[str]) -> bool:
-        return bool(_native.add_menu_item(self._handle, self._menu_path(path), "", 0, True, True, None))
+        return bool(_native.add_menu_item(self._handle, self._menu_path(path), "", 0, True, True, None, "normal", False, None))
 
     def add_menu_item(
         self,
@@ -750,9 +750,17 @@ class Window:
         enabled: bool = True,
         item_id: int | str | None = None,
         key: str | None = None,
+        type: str = "normal",
+        checked: bool = False,
+        group: str | None = None,
     ) -> int:
         menu_path = self._menu_path(path)
         native_id, item_key = self._menu_native_id(key or item_id, label)
+        item_type = type.lower()
+        if item_type == "check":
+            item_type = "checkbox"
+        if item_type not in {"normal", "checkbox", "radio"}:
+            raise ValueError("menu item type must be normal, checkbox, or radio")
 
         info = {
             "id": native_id,
@@ -760,11 +768,22 @@ class Window:
             "path": menu_path,
             "label": label,
             "enabled": enabled,
+            "type": item_type,
+            "checked": checked,
+            "group": group,
         }
         self._menu_items[native_id] = info
 
         def adapter(native_item_id: int) -> None:
             item = self._menu_items.get(native_item_id, info)
+            if item.get("type") == "checkbox":
+                item["checked"] = not bool(item.get("checked"))
+            elif item.get("type") == "radio":
+                item["checked"] = True
+                if item.get("group"):
+                    for other in self._menu_items.values():
+                        if other is not item and other.get("group") == item.get("group"):
+                            other["checked"] = False
             self.emit(MENU, self, item)
             self.emit(f"menu:{native_item_id}", self, item)
             if item.get("key"):
@@ -784,6 +803,9 @@ class Window:
                 enabled,
                 False,
                 adapter,
+                item_type,
+                checked,
+                group,
             )
         )
         if not applied:
@@ -792,6 +814,85 @@ class Window:
                 self._menu_keys.pop(item_key, None)
             raise RuntimeError("native menu item could not be added")
         return native_id
+
+    def add_check_menu_item(
+        self,
+        path: str | Sequence[str],
+        label: str,
+        handler: EventHandler | None = None,
+        *,
+        checked: bool = False,
+        enabled: bool = True,
+        item_id: int | str | None = None,
+        key: str | None = None,
+    ) -> int:
+        return self.add_menu_item(
+            path,
+            label,
+            handler,
+            enabled=enabled,
+            item_id=item_id,
+            key=key,
+            type="checkbox",
+            checked=checked,
+        )
+
+    def add_radio_menu_item(
+        self,
+        path: str | Sequence[str],
+        label: str,
+        group: str,
+        handler: EventHandler | None = None,
+        *,
+        checked: bool = False,
+        enabled: bool = True,
+        item_id: int | str | None = None,
+        key: str | None = None,
+    ) -> int:
+        return self.add_menu_item(
+            path,
+            label,
+            handler,
+            enabled=enabled,
+            item_id=item_id,
+            key=key,
+            type="radio",
+            checked=checked,
+            group=group,
+        )
+
+    def _menu_id(self, item_id: int | str) -> int:
+        if isinstance(item_id, str):
+            return self._menu_keys[item_id]
+        return item_id
+
+    def set_menu_item_enabled(self, item_id: int | str, enabled: bool = True) -> bool:
+        native_id = self._menu_id(item_id)
+        item = self._menu_items.get(native_id)
+        if item is not None:
+            item["enabled"] = enabled
+        return bool(_native.set_menu_item_state(self._handle, native_id, int(enabled), -1, None))
+
+    def set_menu_item_checked(self, item_id: int | str, checked: bool = True) -> bool:
+        native_id = self._menu_id(item_id)
+        item = self._menu_items.get(native_id)
+        if item is not None:
+            item["checked"] = checked
+            if item.get("type") == "radio" and checked and item.get("group"):
+                for other in self._menu_items.values():
+                    if other is not item and other.get("group") == item.get("group"):
+                        other["checked"] = False
+        return bool(_native.set_menu_item_state(self._handle, native_id, -1, int(checked), None))
+
+    def set_menu_item_label(self, item_id: int | str, label: str) -> bool:
+        native_id = self._menu_id(item_id)
+        item = self._menu_items.get(native_id)
+        if item is not None:
+            item["label"] = label
+        return bool(_native.set_menu_item_state(self._handle, native_id, -1, -1, label))
+
+    def get_menu_item(self, item_id: int | str) -> dict[str, Any] | None:
+        return self._menu_items.get(self._menu_id(item_id))
 
     def on_menu(self, item_id: int | str, handler: EventHandler | None = None):
         return self.on(f"menu:{item_id}", handler)
@@ -833,6 +934,9 @@ class Window:
                     entry.get("handler", entry.get("on_click")),
                     enabled=bool(entry.get("enabled", True)),
                     key=str(item_key) if item_key is not None else None,
+                    type=str(entry.get("type", entry.get("kind", "normal"))),
+                    checked=bool(entry.get("checked", False)),
+                    group=entry.get("group", entry.get("radio_group")),
                 )
                 if item_key is not None:
                     ids[str(item_key)] = native_id

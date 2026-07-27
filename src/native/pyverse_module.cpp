@@ -69,6 +69,7 @@ struct RgbaColor {
 };
 
 struct BindingContext;
+struct MenuItemState;
 
 struct WindowHandle {
   std::unique_ptr<webview::webview> window;
@@ -76,6 +77,7 @@ struct WindowHandle {
   std::unordered_map<int, std::unique_ptr<MenuCallbackContext>> menu_callbacks;
   std::unordered_map<std::string, void *> menu_containers;
   std::unordered_map<int, void *> menu_items;
+  std::unordered_map<int, MenuItemState> menu_item_states;
   bool fullscreenable = true;
   bool devtools_enabled = false;
   bool hardware_acceleration_enabled = true;
@@ -132,6 +134,15 @@ struct MenuCallbackContext {
     Py_XDECREF(callable);
     PyGILState_Release(gil);
   }
+};
+
+struct MenuItemState {
+  bool checkable = false;
+  bool checked = false;
+  bool enabled = true;
+  std::string kind = "normal";
+  std::string radio_group;
+  std::string label;
 };
 
 WindowHandle *get_handle(PyObject *capsule) {
@@ -204,6 +215,8 @@ bool parse_menu_path(PyObject *path_object, std::vector<std::string> *path) {
   return true;
 }
 
+bool apply_menu_item_state(WindowHandle *handle, int item_id);
+
 void invoke_menu_callback(int item_id) {
   MenuCallbackContext *context = nullptr;
   auto found = g_menu_callbacks.find(item_id);
@@ -213,6 +226,34 @@ void invoke_menu_callback(int item_id) {
   context = found->second;
   if (!context || !context->callable) {
     return;
+  }
+  auto state_found = context->handle->menu_item_states.find(item_id);
+  if (state_found != context->handle->menu_item_states.end() &&
+      state_found->second.checkable) {
+    bool next_checked = true;
+    if (state_found->second.kind != "radio") {
+      next_checked = !state_found->second.checked;
+    }
+    state_found->second.checked = next_checked;
+    if (state_found->second.kind == "radio" &&
+        !state_found->second.radio_group.empty()) {
+      for (auto &entry : context->handle->menu_item_states) {
+        if (entry.first != item_id &&
+            entry.second.radio_group == state_found->second.radio_group) {
+          entry.second.checked = false;
+        }
+      }
+    }
+    apply_menu_item_state(context->handle, item_id);
+    if (state_found->second.kind == "radio" &&
+        !state_found->second.radio_group.empty()) {
+      for (const auto &entry : context->handle->menu_item_states) {
+        if (entry.first != item_id &&
+            entry.second.radio_group == state_found->second.radio_group) {
+          apply_menu_item_state(context->handle, entry.first);
+        }
+      }
+    }
   }
   PyGILState_STATE gil = PyGILState_Ensure();
   PyObject *result = PyObject_CallFunction(context->callable, "i", item_id);
@@ -285,6 +326,71 @@ HMENU ensure_win32_menu(WindowHandle *handle, HWND hwnd,
   return current;
 }
 #endif
+
+bool apply_menu_item_state(WindowHandle *handle, int item_id) {
+  if (!handle) {
+    return false;
+  }
+  auto state_found = handle->menu_item_states.find(item_id);
+  if (state_found == handle->menu_item_states.end()) {
+    return false;
+  }
+  auto item_found = handle->menu_items.find(item_id);
+  if (item_found == handle->menu_items.end()) {
+    return false;
+  }
+  auto &state = state_found->second;
+#if defined(_WIN32)
+  auto *menu = static_cast<HMENU>(item_found->second);
+  UINT flags = MF_BYCOMMAND | (state.enabled ? MF_ENABLED : MF_GRAYED);
+  EnableMenuItem(menu, static_cast<UINT>(item_id), flags);
+  CheckMenuItem(menu, static_cast<UINT>(item_id),
+                MF_BYCOMMAND | (state.checked ? MF_CHECKED : MF_UNCHECKED));
+  if (!state.label.empty()) {
+    std::wstring label = utf8_to_wide(state.label);
+    ModifyMenuW(menu, static_cast<UINT>(item_id),
+                MF_BYCOMMAND | MF_STRING |
+                    (state.enabled ? MF_ENABLED : MF_GRAYED) |
+                    (state.checked ? MF_CHECKED : MF_UNCHECKED),
+                static_cast<UINT_PTR>(item_id), label.c_str());
+  }
+  return true;
+#elif defined(__APPLE__)
+  auto item = static_cast<id>(item_found->second);
+  using EnabledFn = void (*)(id, SEL, bool);
+  reinterpret_cast<EnabledFn>(objc_msgSend)(
+      item, sel_registerName("setEnabled:"), state.enabled);
+  using StateFn = void (*)(id, SEL, long);
+  reinterpret_cast<StateFn>(objc_msgSend)(
+      item, sel_registerName("setState:"), state.checked ? 1L : 0L);
+  if (!state.label.empty()) {
+    id title = cocoa_string(state.label.c_str());
+    using TitleFn = void (*)(id, SEL, id);
+    reinterpret_cast<TitleFn>(objc_msgSend)(
+        item, sel_registerName("setTitle:"), title);
+    cocoa_release(title);
+  }
+  return true;
+#elif defined(__linux__) && GTK_MAJOR_VERSION < 4
+  auto *item = static_cast<GtkWidget *>(item_found->second);
+  gtk_widget_set_sensitive(item, state.enabled);
+  if (GTK_IS_CHECK_MENU_ITEM(item)) {
+    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(item), state.checked);
+  }
+  if (!state.label.empty() && GTK_IS_MENU_ITEM(item)) {
+    GList *children = gtk_container_get_children(GTK_CONTAINER(item));
+    if (children && GTK_IS_LABEL(children->data)) {
+      gtk_label_set_text(GTK_LABEL(children->data), state.label.c_str());
+    }
+    if (children) {
+      g_list_free(children);
+    }
+  }
+  return true;
+#else
+  return false;
+#endif
+}
 
 
 bool parse_backdrop_effect(const char *name, BackdropEffect *effect) {
@@ -1363,9 +1469,13 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
   int enabled = 1;
   int separator = 0;
   PyObject *callable = Py_None;
+  const char *kind_text = "normal";
+  int checked = 0;
+  const char *radio_group_text = nullptr;
 
-  if (!PyArg_ParseTuple(args, "OOsippO", &capsule, &path_object, &label_text,
-                        &item_id, &enabled, &separator, &callable)) {
+  if (!PyArg_ParseTuple(args, "OOsippOspz", &capsule, &path_object, &label_text,
+                        &item_id, &enabled, &separator, &callable, &kind_text,
+                        &checked, &radio_group_text)) {
     return nullptr;
   }
 
@@ -1400,6 +1510,24 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
   }
 
   std::string label{label_text ? label_text : ""};
+  std::string kind = normalized_text(kind_text);
+  if (kind == "check") {
+    kind = "checkbox";
+  }
+  if (!(kind == "normal" || kind == "checkbox" || kind == "radio")) {
+    PyErr_SetString(PyExc_ValueError, "menu item kind must be normal, checkbox, or radio");
+    return nullptr;
+  }
+  if (callable != Py_None) {
+    MenuItemState state{};
+    state.checkable = kind == "checkbox" || kind == "radio";
+    state.checked = checked != 0;
+    state.enabled = enabled != 0;
+    state.kind = kind;
+    state.radio_group = radio_group_text ? radio_group_text : "";
+    state.label = label;
+    handle->menu_item_states[item_id] = state;
+  }
 
   try {
     auto result = handle->window->window();
@@ -1420,7 +1548,9 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
       handle->menu_containers[key] = submenu;
     } else {
       std::wstring wide_label = utf8_to_wide(label);
-      AppendMenuW(parent, MF_STRING | (enabled ? MF_ENABLED : MF_GRAYED),
+      AppendMenuW(parent,
+                  MF_STRING | (enabled ? MF_ENABLED : MF_GRAYED) |
+                      (checked ? MF_CHECKED : MF_UNCHECKED),
                   static_cast<UINT_PTR>(item_id), wide_label.c_str());
       handle->menu_items[item_id] = parent;
     }
@@ -1521,6 +1651,9 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
       using EnabledFn = void (*)(id, SEL, bool);
       reinterpret_cast<EnabledFn>(objc_msgSend)(
           item, sel_registerName("setEnabled:"), enabled != 0);
+      using StateFn = void (*)(id, SEL, long);
+      reinterpret_cast<StateFn>(objc_msgSend)(
+          item, sel_registerName("setState:"), checked != 0 ? 1L : 0L);
       using AddItemFn = void (*)(id, SEL, id);
       reinterpret_cast<AddItemFn>(objc_msgSend)(
           parent, sel_registerName("addItem:"), item);
@@ -1586,8 +1719,13 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
       submenu_path.push_back(label);
       ensure_menu(submenu_path);
     } else {
-      GtkWidget *item = gtk_menu_item_new_with_label(label.c_str());
+      GtkWidget *item = (kind == "checkbox" || kind == "radio")
+                            ? gtk_check_menu_item_new_with_label(label.c_str())
+                            : gtk_menu_item_new_with_label(label.c_str());
       gtk_widget_set_sensitive(item, enabled != 0);
+      if (GTK_IS_CHECK_MENU_ITEM(item)) {
+        gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(item), checked != 0);
+      }
       g_signal_connect(G_OBJECT(item), "activate",
                        G_CALLBACK(+[](GtkWidget *, gpointer data) {
                          invoke_menu_callback(GPOINTER_TO_INT(data));
@@ -1759,6 +1897,51 @@ PyObject *native_set_menubar_style(PyObject *, PyObject *args) {
     raise_runtime_error(e);
     return nullptr;
   }
+}
+
+PyObject *native_set_menu_item_state(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  int item_id = 0;
+  int enabled = -1;
+  int checked = -1;
+  const char *label_text = nullptr;
+  if (!PyArg_ParseTuple(args, "Oiiiz", &capsule, &item_id, &enabled, &checked,
+                        &label_text)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+  auto state_found = handle->menu_item_states.find(item_id);
+  if (state_found == handle->menu_item_states.end()) {
+    Py_RETURN_FALSE;
+  }
+  if (enabled >= 0) {
+    state_found->second.enabled = enabled != 0;
+  }
+  if (checked >= 0) {
+    state_found->second.checked = checked != 0;
+    if (state_found->second.kind == "radio" &&
+        state_found->second.checked &&
+        !state_found->second.radio_group.empty()) {
+      for (auto &entry : handle->menu_item_states) {
+        if (entry.first != item_id &&
+            entry.second.radio_group == state_found->second.radio_group) {
+          entry.second.checked = false;
+          apply_menu_item_state(handle, entry.first);
+        }
+      }
+    }
+  }
+  if (label_text) {
+    state_found->second.label = label_text;
+  }
+  if (apply_menu_item_state(handle, item_id)) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
 }
 
 PyObject *native_set_icon(PyObject *, PyObject *args) {
@@ -3457,6 +3640,8 @@ PyMethodDef methods[] = {
      "Add a native menubar item, submenu, or separator."},
     {"set_menubar_style", reinterpret_cast<PyCFunction>(native_set_menubar_style),
      METH_VARARGS, "Apply native menubar appearance settings where supported."},
+    {"set_menu_item_state", reinterpret_cast<PyCFunction>(native_set_menu_item_state),
+     METH_VARARGS, "Update native menu item enabled, checked, or label state."},
     {"set_icon", reinterpret_cast<PyCFunction>(native_set_icon), METH_VARARGS,
      "Set the native window icon."},
     {"set_frameless", reinterpret_cast<PyCFunction>(native_set_frameless), METH_VARARGS,

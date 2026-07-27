@@ -34,6 +34,7 @@ The project follows semantic versioning.
 - Added a declarative `set_menu()` API and string-keyed menu events for easier
   native menubar setup.
 - Added native menubar appearance customization via supported platform APIs.
+- Added native checkbox/radio menu items and menu item state update helpers.
 
 ### Changed
 

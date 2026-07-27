@@ -498,6 +498,7 @@ window.set_menu([
         "children": [
             {"id": "new", "label": "New", "handler": new_file},
             {"id": "open", "label": "Open", "enabled": True},
+            {"id": "autosave", "label": "Autosave", "type": "checkbox", "checked": True},
             "-",
             {
                 "label": "Recent",
@@ -511,6 +512,8 @@ window.set_menu([
         "label": "Help",
         "children": [
             {"id": "about", "label": "About"},
+            {"id": "theme_light", "label": "Light", "type": "radio", "group": "theme", "checked": True},
+            {"id": "theme_dark", "label": "Dark", "type": "radio", "group": "theme"},
         ],
     },
 ])
@@ -538,12 +541,27 @@ Methods:
 - `add_submenu(path: Sequence[str], label: str) -> bool`
 - `add_menu_separator(path: Sequence[str]) -> bool`
 - `add_menu_item(path: str | Sequence[str], label: str, handler=None, *, enabled=True, item_id=None, key=None) -> int`
+- `add_check_menu_item(path, label, handler=None, *, checked=False, enabled=True, item_id=None, key=None) -> int`
+- `add_radio_menu_item(path, label, group, handler=None, *, checked=False, enabled=True, item_id=None, key=None) -> int`
+- `set_menu_item_enabled(item_id: int | str, enabled=True) -> bool`
+- `set_menu_item_checked(item_id: int | str, checked=True) -> bool`
+- `set_menu_item_label(item_id: int | str, label: str) -> bool`
+- `get_menu_item(item_id: int | str) -> dict | None`
 - `on_menu(item_id: int | str, handler=None)`
 - `set_menubar_style(*, background=None, foreground=None, accent=None, font=None, font_size=None) -> bool`
 
 `set_menu()` is the recommended high-level API. Each entry can be a top-level
 menu, nested submenu, menu item, `"-"` separator, or `{"separator": True}`.
 Use `id` or `key` for stable event names.
+
+Menu item types:
+
+- `normal`: regular clickable item.
+- `checkbox`: native checkable item with a checkmark.
+- `radio`: native radio-style item; use `group` to make items mutually exclusive.
+
+Checkbox and radio items update their checked state before AppVerse emits menu
+events, so event handlers see the new value in `item["checked"]`.
 
 Menu item clicks emit `appverse.MENU`, `menu:<numeric_id>`, and `menu:<key>`
 when a key exists. If a handler is provided to `add_menu_item()` or in the menu
@@ -554,9 +572,11 @@ Manual menu building is still available:
 ```python
 window.add_menu("File")
 window.add_menu_item("File", "Open", key="open")
+window.add_check_menu_item("File", "Autosave", key="autosave", checked=True)
 window.add_menu_separator("File")
 window.add_submenu("File", "Recent")
 window.add_menu_item(("File", "Recent"), "Project 1")
+window.set_menu_item_enabled("open", False)
 ```
 
 Menubar appearance customization uses native platform APIs only:

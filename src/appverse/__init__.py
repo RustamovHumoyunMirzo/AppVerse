@@ -840,6 +840,29 @@ class Window:
         add_entries(template, ())
         return ids
 
+    def set_menubar_style(
+        self,
+        *,
+        background: str | None = None,
+        foreground: str | None = None,
+        accent: str | None = None,
+        font: str | None = None,
+        font_size: int | None = None,
+    ) -> bool:
+        set_menubar_style = getattr(_native, "set_menubar_style", None)
+        if set_menubar_style is None:
+            return False
+        return bool(
+            set_menubar_style(
+                self._handle,
+                background,
+                foreground,
+                accent,
+                font,
+                font_size or 0,
+            )
+        )
+
     def unbind(self, name: str) -> None:
         self._bindings.pop(name, None)
         _native.unbind(self._handle, name)

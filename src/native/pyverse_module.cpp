@@ -75,6 +75,7 @@ struct WindowHandle {
   std::unordered_map<std::string, std::unique_ptr<BindingContext>> bindings;
   std::unordered_map<int, std::unique_ptr<MenuCallbackContext>> menu_callbacks;
   std::unordered_map<std::string, void *> menu_containers;
+  std::unordered_map<int, void *> menu_items;
   bool fullscreenable = true;
   bool devtools_enabled = false;
   bool hardware_acceleration_enabled = true;
@@ -91,6 +92,7 @@ struct WindowHandle {
 #if defined(_WIN32)
   bool fullscreen = false;
   HBRUSH background_brush = nullptr;
+  HBRUSH menu_background_brush = nullptr;
   HMENU menu_bar = nullptr;
   WNDPROC previous_wndproc = nullptr;
   WINDOWPLACEMENT previous_placement{};
@@ -101,6 +103,9 @@ struct WindowHandle {
 #if defined(_WIN32)
     if (background_brush) {
       DeleteObject(background_brush);
+    }
+    if (menu_background_brush) {
+      DeleteObject(menu_background_brush);
     }
 #endif
   }
@@ -1417,6 +1422,7 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
       std::wstring wide_label = utf8_to_wide(label);
       AppendMenuW(parent, MF_STRING | (enabled ? MF_ENABLED : MF_GRAYED),
                   static_cast<UINT_PTR>(item_id), wide_label.c_str());
+      handle->menu_items[item_id] = parent;
     }
     DrawMenuBar(hwnd);
     Py_RETURN_TRUE;
@@ -1518,6 +1524,7 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
       using AddItemFn = void (*)(id, SEL, id);
       reinterpret_cast<AddItemFn>(objc_msgSend)(
           parent, sel_registerName("addItem:"), item);
+      handle->menu_items[item_id] = item;
       cocoa_release(title);
       cocoa_release(empty);
     }
@@ -1588,10 +1595,163 @@ PyObject *native_add_menu_item(PyObject *, PyObject *args) {
                        GINT_TO_POINTER(item_id));
       gtk_menu_shell_append(GTK_MENU_SHELL(parent), item);
       gtk_widget_show(item);
+      handle->menu_items[item_id] = item;
     }
     Py_RETURN_TRUE;
 #elif defined(__linux__)
     Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_set_menubar_style(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  const char *background_text = nullptr;
+  const char *foreground_text = nullptr;
+  const char *accent_text = nullptr;
+  const char *font_text = nullptr;
+  int font_size = 0;
+
+  if (!PyArg_ParseTuple(args, "Ozzzz|i", &capsule, &background_text,
+                        &foreground_text, &accent_text, &font_text, &font_size)) {
+    return nullptr;
+  }
+
+  RgbaColor background{};
+  RgbaColor foreground{};
+  RgbaColor accent{};
+  bool has_background = false;
+  bool has_foreground = false;
+  bool has_accent = false;
+  try {
+    if (!parse_optional_color(background_text, &background, &has_background) ||
+        !parse_optional_color(foreground_text, &foreground, &has_foreground) ||
+        !parse_optional_color(accent_text, &accent, &has_accent)) {
+      PyErr_SetString(PyExc_ValueError,
+                      "menubar colors must be #RRGGBB, #RRGGBBAA, "
+                      "rgb(...), rgba(...), transparent, or None");
+      return nullptr;
+    }
+  } catch (const std::exception &) {
+    PyErr_SetString(PyExc_ValueError,
+                    "menubar colors must be #RRGGBB, #RRGGBBAA, "
+                    "rgb(...), rgba(...), transparent, or None");
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  try {
+#if defined(_WIN32)
+    auto result = handle->window->window();
+    result.ensure_ok();
+    auto *hwnd = static_cast<HWND>(result.value());
+    bool applied = false;
+    if (has_background && handle->menu_bar) {
+      HBRUSH brush = CreateSolidBrush(RGB(background.red, background.green, background.blue));
+      if (!brush) {
+        Py_RETURN_FALSE;
+      }
+      HBRUSH previous = handle->menu_background_brush;
+      handle->menu_background_brush = brush;
+      MENUINFO info{};
+      info.cbSize = sizeof(MENUINFO);
+      info.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
+      info.hbrBack = brush;
+      applied = SetMenuInfo(handle->menu_bar, &info) != FALSE;
+      for (const auto &entry : handle->menu_containers) {
+        auto *menu = static_cast<HMENU>(entry.second);
+        SetMenuInfo(menu, &info);
+      }
+      if (previous) {
+        DeleteObject(previous);
+      }
+      DrawMenuBar(hwnd);
+    }
+    if (applied) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__APPLE__)
+    bool applied = false;
+    id app = cocoa_send_id(cocoa_class("NSApplication"), "sharedApplication");
+    if (accent_text && accent_text[0] != '\0') {
+      std::string accent_name = normalized_text(accent_text);
+      id appearance = nil;
+      if (accent_name == "dark") {
+        id name = cocoa_string("NSAppearanceNameDarkAqua");
+        using AppearanceFn = id (*)(id, SEL, id);
+        appearance = reinterpret_cast<AppearanceFn>(objc_msgSend)(
+            cocoa_class("NSAppearance"), sel_registerName("appearanceNamed:"), name);
+        cocoa_release(name);
+      } else if (accent_name == "light") {
+        id name = cocoa_string("NSAppearanceNameAqua");
+        using AppearanceFn = id (*)(id, SEL, id);
+        appearance = reinterpret_cast<AppearanceFn>(objc_msgSend)(
+            cocoa_class("NSAppearance"), sel_registerName("appearanceNamed:"), name);
+        cocoa_release(name);
+      }
+      if (appearance) {
+        using SetAppearanceFn = void (*)(id, SEL, id);
+        reinterpret_cast<SetAppearanceFn>(objc_msgSend)(
+            app, sel_registerName("setAppearance:"), appearance);
+        applied = true;
+      }
+    }
+    if (applied) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__linux__) && GTK_MAJOR_VERSION < 4
+    auto found = handle->menu_containers.find("__menubar");
+    if (found == handle->menu_containers.end()) {
+      Py_RETURN_FALSE;
+    }
+    char css[512];
+    int offset = snprintf(css, sizeof(css), "menubar, menu, menuitem {");
+    if (has_background && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "background-color: rgba(%u,%u,%u,%.4f);",
+                         static_cast<unsigned int>(background.red),
+                         static_cast<unsigned int>(background.green),
+                         static_cast<unsigned int>(background.blue),
+                         static_cast<double>(background.alpha) / 255.0);
+    }
+    if (has_foreground && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "color: rgba(%u,%u,%u,%.4f);",
+                         static_cast<unsigned int>(foreground.red),
+                         static_cast<unsigned int>(foreground.green),
+                         static_cast<unsigned int>(foreground.blue),
+                         static_cast<double>(foreground.alpha) / 255.0);
+    }
+    if (font_text && font_text[0] != '\0' && offset > 0 &&
+        offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "font-family: '%s';", font_text);
+    }
+    if (font_size > 0 && offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      offset += snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset),
+                         "font-size: %dpx;", font_size);
+    }
+    if (offset > 0 && offset < static_cast<int>(sizeof(css))) {
+      snprintf(css + offset, sizeof(css) - static_cast<size_t>(offset), "}");
+    }
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(provider, css, -1, nullptr);
+    gtk_style_context_add_provider_for_screen(
+        gtk_widget_get_screen(static_cast<GtkWidget *>(found->second)),
+        GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+    Py_RETURN_TRUE;
 #else
     Py_RETURN_FALSE;
 #endif
@@ -3295,6 +3455,8 @@ PyMethodDef methods[] = {
      "Remove a JavaScript binding."},
     {"add_menu_item", reinterpret_cast<PyCFunction>(native_add_menu_item), METH_VARARGS,
      "Add a native menubar item, submenu, or separator."},
+    {"set_menubar_style", reinterpret_cast<PyCFunction>(native_set_menubar_style),
+     METH_VARARGS, "Apply native menubar appearance settings where supported."},
     {"set_icon", reinterpret_cast<PyCFunction>(native_set_icon), METH_VARARGS,
      "Set the native window icon."},
     {"set_frameless", reinterpret_cast<PyCFunction>(native_set_frameless), METH_VARARGS,

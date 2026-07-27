@@ -33,6 +33,7 @@ The project follows semantic versioning.
   and menu click events across supported platforms.
 - Added a declarative `set_menu()` API and string-keyed menu events for easier
   native menubar setup.
+- Added native menubar appearance customization via supported platform APIs.
 
 ### Changed
 

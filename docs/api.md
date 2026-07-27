@@ -522,6 +522,13 @@ def on_menu(win, item):
 @window.on_menu("open")
 def on_open(win, item):
     ...
+
+window.set_menubar_style(
+    background="#151515",
+    foreground="#f5f5f5",
+    font="Segoe UI",
+    font_size=13,
+)
 ```
 
 Methods:
@@ -532,6 +539,7 @@ Methods:
 - `add_menu_separator(path: Sequence[str]) -> bool`
 - `add_menu_item(path: str | Sequence[str], label: str, handler=None, *, enabled=True, item_id=None, key=None) -> int`
 - `on_menu(item_id: int | str, handler=None)`
+- `set_menubar_style(*, background=None, foreground=None, accent=None, font=None, font_size=None) -> bool`
 
 `set_menu()` is the recommended high-level API. Each entry can be a top-level
 menu, nested submenu, menu item, `"-"` separator, or `{"separator": True}`.
@@ -550,6 +558,17 @@ window.add_menu_separator("File")
 window.add_submenu("File", "Recent")
 window.add_menu_item(("File", "Recent"), "Project 1")
 ```
+
+Menubar appearance customization uses native platform APIs only:
+
+- Windows: applies native `SetMenuInfo` background brushes to the menubar and
+  submenus. Windows does not expose normal per-window menu text color/font APIs
+  without owner-drawn menus, so unsupported fields are ignored.
+- macOS: the app-wide AppKit menubar is system-owned. AppVerse does not draw or
+  fake it, so custom colors/fonts return `False` unless AppKit exposes the
+  requested appearance in the future.
+- Linux GTK3: applies a native GTK CSS provider to `menubar`, `menu`, and
+  `menuitem` widgets. This is GTK styling, not webview HTML/CSS.
 
 Platform behavior:
 

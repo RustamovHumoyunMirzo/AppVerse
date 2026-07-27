@@ -17,7 +17,6 @@ def main() -> None:
         debug=False,
     )
 
-    window.set_hardware_acceleration_enabled(True)
     window.load_html(r"examples\html\index.html")
     window.run()
 

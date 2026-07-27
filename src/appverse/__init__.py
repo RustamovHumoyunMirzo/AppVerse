@@ -28,6 +28,7 @@ HIDE: Final[str] = "hide"
 DESTROY: Final[str] = "destroy"
 MESSAGE: Final[str] = "message"
 ERROR: Final[str] = "error"
+MENU: Final[str] = "menu"
 
 BACKDROP_NONE: Final[str] = "none"
 BACKDROP_ACRYLIC: Final[str] = "acrylic"
@@ -284,6 +285,8 @@ class Window:
         self._visible = native_visible
         self._events: DefaultDict[str, list[EventHandler]] = defaultdict(list)
         self._bindings: dict[str, BindingHandler] = {}
+        self._menu_next_id = 1
+        self._menu_items: dict[int, dict[str, Any]] = {}
 
         self.init(APPVERSE_BRIDGE_JS)
         if options.show_when_ready:
@@ -702,6 +705,64 @@ class Window:
             return decorator
         return decorator(handler)
 
+    def add_menu(self, label: str) -> bool:
+        return bool(_native.add_menu_item(self._handle, (), label, 0, True, False, None))
+
+    def add_submenu(self, path: tuple[str, ...] | list[str], label: str) -> bool:
+        return bool(_native.add_menu_item(self._handle, tuple(path), label, 0, True, False, None))
+
+    def add_menu_separator(self, path: tuple[str, ...] | list[str]) -> bool:
+        return bool(_native.add_menu_item(self._handle, tuple(path), "", 0, True, True, None))
+
+    def add_menu_item(
+        self,
+        path: tuple[str, ...] | list[str],
+        label: str,
+        handler: EventHandler | None = None,
+        *,
+        enabled: bool = True,
+        item_id: int | None = None,
+    ) -> int:
+        if item_id is None:
+            item_id = self._menu_next_id
+            self._menu_next_id += 1
+        if item_id <= 0:
+            raise ValueError("menu item_id must be positive")
+
+        info = {
+            "id": item_id,
+            "path": tuple(path),
+            "label": label,
+            "enabled": enabled,
+        }
+        self._menu_items[item_id] = info
+
+        def adapter(native_item_id: int) -> None:
+            item = self._menu_items.get(native_item_id, info)
+            self.emit(MENU, self, item)
+            self.emit(f"menu:{native_item_id}", self, item)
+            if handler is not None:
+                try:
+                    handler(self, item)
+                except TypeError:
+                    handler()
+
+        applied = bool(
+            _native.add_menu_item(
+                self._handle,
+                tuple(path),
+                label,
+                item_id,
+                enabled,
+                False,
+                adapter,
+            )
+        )
+        if not applied:
+            self._menu_items.pop(item_id, None)
+            raise RuntimeError("native menu item could not be added")
+        return item_id
+
     def unbind(self, name: str) -> None:
         self._bindings.pop(name, None)
         _native.unbind(self._handle, name)
@@ -808,6 +869,7 @@ __all__ = [
     "READY_TO_SHOW",
     "SHOW",
     "HIDE",
+    "MENU",
     "START",
     "Window",
     "WindowOptions",

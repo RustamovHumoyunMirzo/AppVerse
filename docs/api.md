@@ -486,6 +486,43 @@ Windows currently shows the OS system menu; unsupported platforms return
 Returns whether native webview developer tooling is enabled. Enable it with
 `debug=True`, `devtools=True`, or `set_devtools_enabled(True)`.
 
+## Native Menubar
+
+AppVerse supports native menubars with top-level menus, submenus, separators,
+clickable custom items, and Python callbacks.
+
+```python
+window.add_menu("File")
+window.add_menu_item(("File",), "New", lambda win, item: print(item["label"]))
+window.add_menu_separator(("File",))
+window.add_submenu(("File",), "Recent")
+window.add_menu_item(("File", "Recent"), "Project 1")
+
+@window.on(appverse.MENU)
+def on_menu(win, item):
+    print("menu clicked", item["id"], item["label"])
+```
+
+Methods:
+
+- `add_menu(label: str) -> bool`
+- `add_submenu(path: Sequence[str], label: str) -> bool`
+- `add_menu_separator(path: Sequence[str]) -> bool`
+- `add_menu_item(path: Sequence[str], label: str, handler=None, *, enabled=True, item_id=None) -> int`
+
+Menu item clicks emit `appverse.MENU` and `menu:<item_id>`. If a handler is
+provided to `add_menu_item()`, AppVerse calls it after emitting events.
+
+Platform behavior:
+
+- Windows: attaches a native Win32 menubar to the window and dispatches
+  `WM_COMMAND` menu actions.
+- macOS: uses the process-wide AppKit main menu. This is app-wide by platform
+  design, so menus from the active AppVerse window share the native application
+  menubar.
+- Linux: inserts a GTK menubar above the webview where GTK menu widgets are
+  available.
+
 ## App Region CSS
 
 App regions are authored in HTML/CSS, like Electron. Use them with frameless

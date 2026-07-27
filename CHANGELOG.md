@@ -29,6 +29,8 @@ The project follows semantic versioning.
   behavior.
 - Added rounded-corner constructor option, setter, and getters across supported
   native window backends.
+- Added native menubar support with menus, submenus, separators, item callbacks,
+  and menu click events across supported platforms.
 
 ### Changed
 

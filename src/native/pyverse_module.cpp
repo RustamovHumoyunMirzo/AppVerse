@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #if defined(_WIN32)
 #include <shellapi.h>
@@ -50,6 +51,9 @@ constexpr const char *kPreloadHtml =
     "html,body{margin:0;width:100%;height:100%;background:#101418;}"
     "</style></head><body></body></html>";
 
+struct MenuCallbackContext;
+std::unordered_map<int, MenuCallbackContext *> g_menu_callbacks;
+
 enum class BackdropEffect {
   EffectNone,
   EffectAcrylic,
@@ -69,6 +73,8 @@ struct BindingContext;
 struct WindowHandle {
   std::unique_ptr<webview::webview> window;
   std::unordered_map<std::string, std::unique_ptr<BindingContext>> bindings;
+  std::unordered_map<int, std::unique_ptr<MenuCallbackContext>> menu_callbacks;
+  std::unordered_map<std::string, void *> menu_containers;
   bool fullscreenable = true;
   bool devtools_enabled = false;
   bool hardware_acceleration_enabled = true;
@@ -85,6 +91,8 @@ struct WindowHandle {
 #if defined(_WIN32)
   bool fullscreen = false;
   HBRUSH background_brush = nullptr;
+  HMENU menu_bar = nullptr;
+  WNDPROC previous_wndproc = nullptr;
   WINDOWPLACEMENT previous_placement{};
   LONG_PTR previous_style = 0;
 #endif
@@ -103,6 +111,18 @@ struct BindingContext {
   PyObject *callable{};
 
   ~BindingContext() {
+    PyGILState_STATE gil = PyGILState_Ensure();
+    Py_XDECREF(callable);
+    PyGILState_Release(gil);
+  }
+};
+
+struct MenuCallbackContext {
+  WindowHandle *handle{};
+  int item_id = 0;
+  PyObject *callable{};
+
+  ~MenuCallbackContext() {
     PyGILState_STATE gil = PyGILState_Ensure();
     Py_XDECREF(callable);
     PyGILState_Release(gil);
@@ -133,6 +153,134 @@ void raise_runtime_error(const std::exception &e) {
 PyObject *none_on_success() {
   Py_RETURN_NONE;
 }
+
+std::string menu_key(const std::vector<std::string> &path) {
+  std::string key;
+  for (const auto &part : path) {
+    if (!key.empty()) {
+      key += "/";
+    }
+    key += part;
+  }
+  return key;
+}
+
+bool parse_menu_path(PyObject *path_object, std::vector<std::string> *path) {
+  if (!path) {
+    return false;
+  }
+  path->clear();
+  if (!PySequence_Check(path_object)) {
+    PyErr_SetString(PyExc_TypeError, "menu path must be a sequence of strings");
+    return false;
+  }
+  Py_ssize_t size = PySequence_Size(path_object);
+  if (size < 0) {
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < size; ++i) {
+    PyObject *item = PySequence_GetItem(path_object, i);
+    if (!item) {
+      return false;
+    }
+    if (!PyUnicode_Check(item)) {
+      Py_DECREF(item);
+      PyErr_SetString(PyExc_TypeError, "menu path items must be strings");
+      return false;
+    }
+    const char *text = PyUnicode_AsUTF8(item);
+    if (!text) {
+      Py_DECREF(item);
+      return false;
+    }
+    path->emplace_back(text);
+    Py_DECREF(item);
+  }
+  return true;
+}
+
+void invoke_menu_callback(int item_id) {
+  MenuCallbackContext *context = nullptr;
+  auto found = g_menu_callbacks.find(item_id);
+  if (found == g_menu_callbacks.end()) {
+    return;
+  }
+  context = found->second;
+  if (!context || !context->callable) {
+    return;
+  }
+  PyGILState_STATE gil = PyGILState_Ensure();
+  PyObject *result = PyObject_CallFunction(context->callable, "i", item_id);
+  if (!result) {
+    PyErr_Print();
+  } else {
+    Py_DECREF(result);
+  }
+  PyGILState_Release(gil);
+}
+
+#if defined(_WIN32)
+std::wstring utf8_to_wide(const std::string &value) {
+  if (value.empty()) {
+    return L"";
+  }
+  int size = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, nullptr, 0);
+  if (size <= 0) {
+    return L"";
+  }
+  std::wstring result(static_cast<size_t>(size - 1), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, result.data(), size);
+  return result;
+}
+
+LRESULT CALLBACK appverse_menu_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+  auto *handle = reinterpret_cast<WindowHandle *>(
+      GetPropW(hwnd, L"AppVerseWindowHandle"));
+  if (msg == WM_COMMAND && handle) {
+    int item_id = LOWORD(wp);
+    if (g_menu_callbacks.find(item_id) != g_menu_callbacks.end()) {
+      invoke_menu_callback(item_id);
+      return 0;
+    }
+  }
+  if (handle && handle->previous_wndproc) {
+    return CallWindowProcW(handle->previous_wndproc, hwnd, msg, wp, lp);
+  }
+  return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+HMENU ensure_win32_menu(WindowHandle *handle, HWND hwnd,
+                        const std::vector<std::string> &path) {
+  if (!handle->menu_bar) {
+    handle->menu_bar = CreateMenu();
+    SetMenu(hwnd, handle->menu_bar);
+    SetPropW(hwnd, L"AppVerseWindowHandle", handle);
+    handle->previous_wndproc = reinterpret_cast<WNDPROC>(
+        SetWindowLongPtrW(hwnd, GWLP_WNDPROC,
+                          reinterpret_cast<LONG_PTR>(appverse_menu_wndproc)));
+  }
+
+  HMENU current = handle->menu_bar;
+  std::vector<std::string> key_parts;
+  for (const auto &part : path) {
+    key_parts.push_back(part);
+    std::string key = menu_key(key_parts);
+    auto found = handle->menu_containers.find(key);
+    if (found != handle->menu_containers.end()) {
+      current = static_cast<HMENU>(found->second);
+      continue;
+    }
+    HMENU submenu = CreatePopupMenu();
+    std::wstring label = utf8_to_wide(part);
+    AppendMenuW(current, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu),
+                label.c_str());
+    handle->menu_containers[key] = submenu;
+    current = submenu;
+  }
+  return current;
+}
+#endif
+
 
 bool parse_backdrop_effect(const char *name, BackdropEffect *effect) {
   if (!name || !effect) {
@@ -847,6 +995,10 @@ PyObject *native_destroy(PyObject *, PyObject *args) {
     return nullptr;
   }
 
+  for (const auto &entry : handle->menu_callbacks) {
+    g_menu_callbacks.erase(entry.first);
+  }
+  handle->menu_callbacks.clear();
   handle->bindings.clear();
   handle->window.reset();
   return none_on_success();
@@ -1196,6 +1348,257 @@ PyObject *native_unbind(PyObject *, PyObject *args) {
   }
 
   return none_on_success();
+}
+
+PyObject *native_add_menu_item(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  PyObject *path_object = nullptr;
+  const char *label_text = nullptr;
+  int item_id = 0;
+  int enabled = 1;
+  int separator = 0;
+  PyObject *callable = Py_None;
+
+  if (!PyArg_ParseTuple(args, "OOsippO", &capsule, &path_object, &label_text,
+                        &item_id, &enabled, &separator, &callable)) {
+    return nullptr;
+  }
+
+  std::vector<std::string> path;
+  if (!parse_menu_path(path_object, &path)) {
+    return nullptr;
+  }
+
+  if (callable != Py_None && !PyCallable_Check(callable)) {
+    PyErr_SetString(PyExc_TypeError, "menu callback must be callable or None");
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  if (callable != Py_None && item_id <= 0) {
+    PyErr_SetString(PyExc_ValueError, "clickable menu items need a positive item id");
+    return nullptr;
+  }
+
+  if (callable != Py_None) {
+    auto context = std::make_unique<MenuCallbackContext>();
+    context->handle = handle;
+    context->item_id = item_id;
+    Py_INCREF(callable);
+    context->callable = callable;
+    g_menu_callbacks[item_id] = context.get();
+    handle->menu_callbacks[item_id] = std::move(context);
+  }
+
+  std::string label{label_text ? label_text : ""};
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    HMENU parent = ensure_win32_menu(handle, hwnd, path);
+    if (separator) {
+      AppendMenuW(parent, MF_SEPARATOR, 0, nullptr);
+    } else if (callable == Py_None) {
+      std::vector<std::string> submenu_path = path;
+      submenu_path.push_back(label);
+      std::string key = menu_key(submenu_path);
+      HMENU submenu = CreatePopupMenu();
+      std::wstring wide_label = utf8_to_wide(label);
+      AppendMenuW(parent, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu),
+                  wide_label.c_str());
+      handle->menu_containers[key] = submenu;
+    } else {
+      std::wstring wide_label = utf8_to_wide(label);
+      AppendMenuW(parent, MF_STRING | (enabled ? MF_ENABLED : MF_GRAYED),
+                  static_cast<UINT_PTR>(item_id), wide_label.c_str());
+    }
+    DrawMenuBar(hwnd);
+    Py_RETURN_TRUE;
+#elif defined(__APPLE__)
+    id app = cocoa_send_id(cocoa_class("NSApplication"), "sharedApplication");
+    id main_menu = cocoa_send_id(app, "mainMenu");
+    if (!main_menu) {
+      main_menu = cocoa_send_id(cocoa_class("NSMenu"), "alloc");
+      using InitFn = id (*)(id, SEL);
+      main_menu = reinterpret_cast<InitFn>(objc_msgSend)(
+          main_menu, sel_registerName("init"));
+      using SetMainMenuFn = void (*)(id, SEL, id);
+      reinterpret_cast<SetMainMenuFn>(objc_msgSend)(
+          app, sel_registerName("setMainMenu:"), main_menu);
+    }
+
+    auto ensure_menu = [&](const std::vector<std::string> &menu_path) -> id {
+      id parent = main_menu;
+      std::vector<std::string> key_parts;
+      for (const auto &part : menu_path) {
+        key_parts.push_back(part);
+        std::string key = menu_key(key_parts);
+        auto found = handle->menu_containers.find(key);
+        if (found != handle->menu_containers.end()) {
+          parent = static_cast<id>(found->second);
+          continue;
+        }
+        id title = cocoa_string(part.c_str());
+        id empty = cocoa_string("");
+        using ItemInitFn = id (*)(id, SEL, id, SEL, id);
+        id item = cocoa_send_id(cocoa_class("NSMenuItem"), "alloc");
+        item = reinterpret_cast<ItemInitFn>(objc_msgSend)(
+            item, sel_registerName("initWithTitle:action:keyEquivalent:"),
+            title, nil, empty);
+        id submenu = cocoa_send_id(cocoa_class("NSMenu"), "alloc");
+        using MenuInitFn = id (*)(id, SEL, id);
+        submenu = reinterpret_cast<MenuInitFn>(objc_msgSend)(
+            submenu, sel_registerName("initWithTitle:"), title);
+        using SetSubmenuFn = void (*)(id, SEL, id);
+        reinterpret_cast<SetSubmenuFn>(objc_msgSend)(
+            item, sel_registerName("setSubmenu:"), submenu);
+        using AddItemFn = void (*)(id, SEL, id);
+        reinterpret_cast<AddItemFn>(objc_msgSend)(
+            parent, sel_registerName("addItem:"), item);
+        handle->menu_containers[key] = submenu;
+        parent = submenu;
+        cocoa_release(title);
+        cocoa_release(empty);
+      }
+      return parent;
+    };
+
+    static id menu_target = nil;
+    if (!menu_target) {
+      Class cls = objc_getClass("AppVerseMenuTarget");
+      if (!cls) {
+        cls = objc_allocateClassPair(cocoa_class("NSObject"),
+                                     "AppVerseMenuTarget", 0);
+        auto action = +[](id, SEL, id sender) {
+          using TagFn = long (*)(id, SEL);
+          long tag = reinterpret_cast<TagFn>(objc_msgSend)(
+              sender, sel_registerName("tag"));
+          invoke_menu_callback(static_cast<int>(tag));
+        };
+        class_addMethod(cls, sel_registerName("appverseMenuAction:"),
+                        reinterpret_cast<IMP>(action), "v@:@");
+        objc_registerClassPair(cls);
+      }
+      menu_target = cocoa_send_id(reinterpret_cast<id>(cls), "new");
+    }
+
+    id parent = ensure_menu(path);
+    if (separator) {
+      id separator_item = cocoa_send_id(cocoa_class("NSMenuItem"), "separatorItem");
+      using AddItemFn = void (*)(id, SEL, id);
+      reinterpret_cast<AddItemFn>(objc_msgSend)(
+          parent, sel_registerName("addItem:"), separator_item);
+    } else if (callable == Py_None) {
+      std::vector<std::string> submenu_path = path;
+      submenu_path.push_back(label);
+      ensure_menu(submenu_path);
+    } else {
+      id title = cocoa_string(label.c_str());
+      id empty = cocoa_string("");
+      using ItemInitFn = id (*)(id, SEL, id, SEL, id);
+      id item = cocoa_send_id(cocoa_class("NSMenuItem"), "alloc");
+      item = reinterpret_cast<ItemInitFn>(objc_msgSend)(
+          item, sel_registerName("initWithTitle:action:keyEquivalent:"), title,
+          sel_registerName("appverseMenuAction:"), empty);
+      using TargetFn = void (*)(id, SEL, id);
+      reinterpret_cast<TargetFn>(objc_msgSend)(
+          item, sel_registerName("setTarget:"), menu_target);
+      using TagFn = void (*)(id, SEL, long);
+      reinterpret_cast<TagFn>(objc_msgSend)(
+          item, sel_registerName("setTag:"), static_cast<long>(item_id));
+      using EnabledFn = void (*)(id, SEL, bool);
+      reinterpret_cast<EnabledFn>(objc_msgSend)(
+          item, sel_registerName("setEnabled:"), enabled != 0);
+      using AddItemFn = void (*)(id, SEL, id);
+      reinterpret_cast<AddItemFn>(objc_msgSend)(
+          parent, sel_registerName("addItem:"), item);
+      cocoa_release(title);
+      cocoa_release(empty);
+    }
+    Py_RETURN_TRUE;
+#elif defined(__linux__) && GTK_MAJOR_VERSION < 4
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (!GTK_IS_WINDOW(window)) {
+      Py_RETURN_FALSE;
+    }
+    GtkWidget *menu_bar = nullptr;
+    auto bar_found = handle->menu_containers.find("__menubar");
+    if (bar_found != handle->menu_containers.end()) {
+      menu_bar = static_cast<GtkWidget *>(bar_found->second);
+    } else {
+      menu_bar = gtk_menu_bar_new();
+      auto browser = handle->window->browser_controller();
+      browser.ensure_ok();
+      auto *webview = static_cast<GtkWidget *>(browser.value());
+      g_object_ref(webview);
+      GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+      gtk_container_remove(GTK_CONTAINER(window), webview);
+      gtk_container_add(GTK_CONTAINER(window), box);
+      gtk_box_pack_start(GTK_BOX(box), menu_bar, FALSE, FALSE, 0);
+      gtk_box_pack_start(GTK_BOX(box), webview, TRUE, TRUE, 0);
+      gtk_widget_show_all(box);
+      g_object_unref(webview);
+      handle->menu_containers["__menubar"] = menu_bar;
+    }
+
+    auto ensure_menu = [&](const std::vector<std::string> &menu_path) -> GtkWidget * {
+      GtkWidget *parent = menu_bar;
+      std::vector<std::string> key_parts;
+      for (const auto &part : menu_path) {
+        key_parts.push_back(part);
+        std::string key = menu_key(key_parts);
+        auto found = handle->menu_containers.find(key);
+        if (found != handle->menu_containers.end()) {
+          parent = static_cast<GtkWidget *>(found->second);
+          continue;
+        }
+        GtkWidget *item = gtk_menu_item_new_with_label(part.c_str());
+        GtkWidget *submenu = gtk_menu_new();
+        gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), submenu);
+        gtk_menu_shell_append(GTK_MENU_SHELL(parent), item);
+        gtk_widget_show(item);
+        handle->menu_containers[key] = submenu;
+        parent = submenu;
+      }
+      return parent;
+    };
+
+    GtkWidget *parent = ensure_menu(path);
+    if (separator) {
+      GtkWidget *item = gtk_separator_menu_item_new();
+      gtk_menu_shell_append(GTK_MENU_SHELL(parent), item);
+      gtk_widget_show(item);
+    } else if (callable == Py_None) {
+      std::vector<std::string> submenu_path = path;
+      submenu_path.push_back(label);
+      ensure_menu(submenu_path);
+    } else {
+      GtkWidget *item = gtk_menu_item_new_with_label(label.c_str());
+      gtk_widget_set_sensitive(item, enabled != 0);
+      g_signal_connect(G_OBJECT(item), "activate",
+                       G_CALLBACK(+[](GtkWidget *, gpointer data) {
+                         invoke_menu_callback(GPOINTER_TO_INT(data));
+                       }),
+                       GINT_TO_POINTER(item_id));
+      gtk_menu_shell_append(GTK_MENU_SHELL(parent), item);
+      gtk_widget_show(item);
+    }
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    Py_RETURN_FALSE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
 }
 
 PyObject *native_set_icon(PyObject *, PyObject *args) {
@@ -2890,6 +3293,8 @@ PyMethodDef methods[] = {
      "Bind a JavaScript-callable Python callback."},
     {"unbind", reinterpret_cast<PyCFunction>(native_unbind), METH_VARARGS,
      "Remove a JavaScript binding."},
+    {"add_menu_item", reinterpret_cast<PyCFunction>(native_add_menu_item), METH_VARARGS,
+     "Add a native menubar item, submenu, or separator."},
     {"set_icon", reinterpret_cast<PyCFunction>(native_set_icon), METH_VARARGS,
      "Set the native window icon."},
     {"set_frameless", reinterpret_cast<PyCFunction>(native_set_frameless), METH_VARARGS,

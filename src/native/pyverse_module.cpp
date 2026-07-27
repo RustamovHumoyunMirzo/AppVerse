@@ -38,6 +38,9 @@
 #if defined(_WIN32) && !defined(DWMWA_NCRENDERING_POLICY)
 #define DWMWA_NCRENDERING_POLICY 2
 #endif
+#if defined(_WIN32) && !defined(DWMWA_WINDOW_CORNER_PREFERENCE)
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
 
 namespace {
 
@@ -77,6 +80,7 @@ struct WindowHandle {
   bool closable = true;
   bool minimizable = true;
   bool maximizable = true;
+  int rounded_corner_radius = 8;
   std::string shadow_style = "system";
 #if defined(_WIN32)
   bool fullscreen = false;
@@ -1913,6 +1917,106 @@ PyObject *native_set_shadow(PyObject *, PyObject *args) {
   }
 }
 
+PyObject *native_set_rounded_corners(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  int radius = 8;
+  if (!PyArg_ParseTuple(args, "Oi", &capsule, &radius)) {
+    return nullptr;
+  }
+  if (radius < 0) {
+    PyErr_SetString(PyExc_ValueError, "rounded corner radius must be >= 0");
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+  handle->rounded_corner_radius = radius;
+
+  try {
+    auto result = handle->window->window();
+    result.ensure_ok();
+#if defined(_WIN32)
+    auto *hwnd = static_cast<HWND>(result.value());
+    int preference = 1;  // DWMWCP_DONOTROUND
+    if (radius > 0) {
+      preference = radius <= 8 ? 3 : 2;  // DWMWCP_ROUNDSMALL / DWMWCP_ROUND
+    }
+    HRESULT ok = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                                       &preference, sizeof(preference));
+    if (SUCCEEDED(ok)) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+#elif defined(__APPLE__)
+    auto window = static_cast<id>(result.value());
+    id content_view = cocoa_send_id(window, "contentView");
+    if (!content_view) {
+      Py_RETURN_FALSE;
+    }
+
+    using BoolFn = void (*)(id, SEL, bool);
+    reinterpret_cast<BoolFn>(objc_msgSend)(
+        content_view, sel_registerName("setWantsLayer:"), true);
+    id layer = cocoa_send_id(content_view, "layer");
+    if (!layer) {
+      Py_RETURN_FALSE;
+    }
+    using DoubleFn = void (*)(id, SEL, double);
+    reinterpret_cast<DoubleFn>(objc_msgSend)(
+        layer, sel_registerName("setCornerRadius:"), static_cast<double>(radius));
+    reinterpret_cast<BoolFn>(objc_msgSend)(
+        layer, sel_registerName("setMasksToBounds:"), radius > 0);
+    reinterpret_cast<BoolFn>(objc_msgSend)(
+        window, sel_registerName("setOpaque:"), radius == 0);
+    Py_RETURN_TRUE;
+#elif defined(__linux__)
+    auto *window = static_cast<GtkWidget *>(result.value());
+    if (!GTK_IS_WINDOW(window)) {
+      Py_RETURN_FALSE;
+    }
+    char css[192];
+    snprintf(css, sizeof(css),
+             "window, window.background, .background { border-radius: %dpx; }",
+             radius);
+    GtkCssProvider *provider = gtk_css_provider_new();
+#if GTK_MAJOR_VERSION < 4
+    gtk_css_provider_load_from_data(provider, css, -1, nullptr);
+    GtkStyleContext *context = gtk_widget_get_style_context(window);
+    gtk_style_context_add_provider(
+        context, GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#else
+    gtk_css_provider_load_from_data(provider, css, -1);
+    gtk_style_context_add_provider_for_display(
+        gtk_widget_get_display(window), GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#endif
+    g_object_unref(provider);
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
+  } catch (const std::exception &e) {
+    raise_runtime_error(e);
+    return nullptr;
+  }
+}
+
+PyObject *native_get_rounded_corners(PyObject *, PyObject *args) {
+  PyObject *capsule = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &capsule)) {
+    return nullptr;
+  }
+
+  auto *handle = get_handle(capsule);
+  if (!handle) {
+    return nullptr;
+  }
+
+  return PyLong_FromLong(handle->rounded_corner_radius);
+}
+
 PyObject *native_set_visible(PyObject *, PyObject *args) {
   PyObject *capsule = nullptr;
   int visible = 0;
@@ -2800,6 +2904,10 @@ PyMethodDef methods[] = {
      METH_VARARGS, "Set native window caption/control appearance."},
     {"set_shadow", reinterpret_cast<PyCFunction>(native_set_shadow), METH_VARARGS,
      "Set native window shadow state/style."},
+    {"set_rounded_corners", reinterpret_cast<PyCFunction>(native_set_rounded_corners),
+     METH_VARARGS, "Set native window rounded corner radius."},
+    {"get_rounded_corners", reinterpret_cast<PyCFunction>(native_get_rounded_corners),
+     METH_VARARGS, "Return native window rounded corner radius."},
     {"set_visible", reinterpret_cast<PyCFunction>(native_set_visible), METH_VARARGS,
      "Toggle native window visibility."},
     {"set_window_capability", reinterpret_cast<PyCFunction>(native_set_window_capability),

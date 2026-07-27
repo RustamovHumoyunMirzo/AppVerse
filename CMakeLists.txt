@@ -34,7 +34,7 @@ target_include_directories(pyverse_native PRIVATE
 )
 
 if(APPLE)
-  target_link_libraries(pyverse_native PRIVATE "-framework Cocoa")
+  target_link_libraries(pyverse_native PRIVATE "-framework Cocoa" "-framework QuartzCore")
 endif()
 
 if(WIN32)

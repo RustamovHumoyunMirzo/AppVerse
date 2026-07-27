@@ -27,6 +27,8 @@ The project follows semantic versioning.
 - Added window capability flags and getters for resizable, movable,
   always-on-top, taskbar visibility, closable, minimizable, and maximizable
   behavior.
+- Added rounded-corner constructor option, setter, and getters across supported
+  native window backends.
 
 ### Changed
 

@@ -188,6 +188,7 @@ class WindowOptions:
     closable: bool = True
     minimizable: bool = True
     maximizable: bool = True
+    rounded_corners: bool | int = True
     icon: str | os.PathLike[str] | None = None
     visible: bool = True
     show_when_ready: bool = False
@@ -229,6 +230,7 @@ class Window:
         closable: bool = True,
         minimizable: bool = True,
         maximizable: bool = True,
+        rounded_corners: bool | int = True,
         icon: str | os.PathLike[str] | None = None,
         visible: bool = True,
         show_when_ready: bool = False,
@@ -262,6 +264,7 @@ class Window:
                 closable=closable,
                 minimizable=minimizable,
                 maximizable=maximizable,
+                rounded_corners=rounded_corners,
                 icon=icon,
                 visible=visible,
                 show_when_ready=show_when_ready,
@@ -314,6 +317,7 @@ class Window:
         self.set_closable(options.closable)
         self.set_minimizable(options.minimizable)
         self.set_maximizable(options.maximizable)
+        self.set_rounded_corners(options.rounded_corners)
         if options.fullscreen:
             self.set_fullscreen(True)
         if options.icon is not None:
@@ -427,6 +431,28 @@ class Window:
         if set_shadow is None:
             return False
         return bool(set_shadow(self._handle, style))
+
+    def set_rounded_corners(self, radius: bool | int = True) -> bool:
+        set_rounded_corners = getattr(_native, "set_rounded_corners", None)
+        if isinstance(radius, bool):
+            value = 8 if radius else 0
+        else:
+            value = int(radius)
+        if value < 0:
+            raise ValueError("rounded corner radius must be >= 0")
+        self.options.rounded_corners = radius
+        if set_rounded_corners is None:
+            return False
+        return bool(set_rounded_corners(self._handle, value))
+
+    def get_rounded_corners(self) -> int:
+        get_rounded_corners = getattr(_native, "get_rounded_corners", None)
+        if get_rounded_corners is None:
+            return 8 if self.options.rounded_corners is True else int(self.options.rounded_corners)
+        return int(get_rounded_corners(self._handle))
+
+    def has_rounded_corners(self) -> bool:
+        return self.get_rounded_corners() > 0
 
     def set_window_captions(
         self,

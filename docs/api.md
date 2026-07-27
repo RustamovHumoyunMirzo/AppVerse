@@ -33,6 +33,7 @@ Creates a native webview window. Accepted options mirror `WindowOptions`:
 - `closable`
 - `minimizable`
 - `maximizable`
+- `rounded_corners`
 - `icon`
 - `visible`
 - `show_when_ready`
@@ -67,6 +68,7 @@ appverse.WindowOptions(
     closable=True,
     minimizable=True,
     maximizable=True,
+    rounded_corners=True,
     icon=None,
     visible=True,
     show_when_ready=False,
@@ -298,6 +300,34 @@ Platform behavior:
 
 Returns whether AppVerse considers the native shadow enabled. `window.hasShadow`
 is also available as a read-only property.
+
+### `set_rounded_corners(radius: bool | int = True) -> bool`
+
+Sets native window rounded corners. `True` uses AppVerse's default radius,
+`False` disables rounded corners, and an integer sets a preferred radius where
+the platform allows it.
+
+```python
+window.set_rounded_corners(True)
+window.set_rounded_corners(14)
+window.set_rounded_corners(False)
+```
+
+Platform behavior:
+
+- Windows: maps the radius to DWM corner preferences (`square`, `small`, or
+  rounded). Windows controls the exact physical radius.
+- macOS: applies the radius to the window content layer.
+- Linux: applies a GTK border-radius rule to the native window.
+
+### `get_rounded_corners() -> int`
+
+Returns the current AppVerse rounded-corner radius. `0` means rounded corners
+are disabled.
+
+### `has_rounded_corners() -> bool`
+
+Returns whether the current rounded-corner radius is greater than `0`.
 
 ### `set_window_captions(...) -> bool`
 
